@@ -47,6 +47,7 @@ type StoredFile = {
 
 type BookmarkItem = {
   id: string
+  groupId: string | null
   title: string
   url: string
   description: string | null
@@ -55,6 +56,7 @@ type BookmarkItem = {
 
 type NoteItem = {
   id: string
+  groupId: string | null
   title: string
   content: string
   color: NoteColor
@@ -89,6 +91,8 @@ type FolderContents = {
   folders: FolderItem[]
   files: StoredFile[]
 }
+
+type ContentGroup = { id: string; type: 'BOOKMARK' | 'NOTE'; name: string; createdAt: string }
 
 const NOTE_COLORS: { value: NoteColor; label: string }[] = [
   { value: 'white', label: 'Белый' },
@@ -143,13 +147,17 @@ function App() {
   const [files, setFiles] = useState<StoredFile[]>([])
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([])
   const [notes, setNotes] = useState<NoteItem[]>([])
+  const [bookmarkGroups, setBookmarkGroups] = useState<ContentGroup[]>([])
+  const [noteGroups, setNoteGroups] = useState<ContentGroup[]>([])
+  const [bookmarkGroup, setBookmarkGroup] = useState('all')
+  const [noteGroup, setNoteGroup] = useState('all')
   const [path, setPath] = useState<FolderPathItem[]>([{ id: null, name: 'Главная' }])
   const [folderName, setFolderName] = useState('')
-  const [bookmarkForm, setBookmarkForm] = useState({ title: '', url: '', description: '' })
-  const [noteForm, setNoteForm] = useState<{ title: string; content: string; color: NoteColor }>({
+  const [bookmarkForm, setBookmarkForm] = useState({ title: '', url: '', description: '', groupId: '' })
+  const [noteForm, setNoteForm] = useState<{ title: string; content: string; color: NoteColor; groupId: string }>({
     title: '',
     content: '',
-    color: 'white',
+    color: 'white', groupId: '',
   })
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const [noteSearch, setNoteSearch] = useState('')
@@ -171,13 +179,16 @@ function App() {
 
   const filteredNotes = useMemo(() => {
     const query = noteSearch.trim().toLocaleLowerCase('ru-RU')
-    if (!query) {
-      return notes
-    }
-    return notes.filter((note) =>
+    const grouped = notes.filter((note) => noteGroup === 'all' || (noteGroup === 'ungrouped' ? !note.groupId : note.groupId === noteGroup))
+    if (!query) return grouped
+    return grouped.filter((note) =>
       `${note.title} ${note.content}`.toLocaleLowerCase('ru-RU').includes(query),
     )
-  }, [noteSearch, notes])
+  }, [noteSearch, notes, noteGroup])
+
+  const filteredBookmarks = useMemo(() => bookmarks.filter((bookmark) =>
+    bookmarkGroup === 'all' || (bookmarkGroup === 'ungrouped' ? !bookmark.groupId : bookmark.groupId === bookmarkGroup)
+  ), [bookmarks, bookmarkGroup])
 
   useEffect(() => {
     void loadFilesView(currentFolderId)
@@ -255,7 +266,8 @@ function App() {
   async function loadBookmarks() {
     setIsLoading(true)
     try {
-      setBookmarks(await api.get<BookmarkItem[]>('/api/bookmarks'))
+      const [items, groups] = await Promise.all([api.get<BookmarkItem[]>('/api/bookmarks'), api.get<ContentGroup[]>('/api/groups?type=BOOKMARK')])
+      setBookmarks(items); setBookmarkGroups(groups)
     } catch (error) {
       showError(error)
     } finally {
@@ -266,7 +278,8 @@ function App() {
   async function loadNotes() {
     setIsLoading(true)
     try {
-      setNotes(await api.get<NoteItem[]>('/api/notes'))
+      const [items, groups] = await Promise.all([api.get<NoteItem[]>('/api/notes'), api.get<ContentGroup[]>('/api/groups?type=NOTE')])
+      setNotes(items); setNoteGroups(groups)
     } catch (error) {
       showError(error)
     } finally {
@@ -340,6 +353,48 @@ function App() {
     })
   }
 
+  async function renameFolder(folder: FolderItem) {
+    const name = window.prompt('Новое название папки', folder.name)?.trim()
+    if (!name || name === folder.name) return
+    try {
+      await api.patch<FolderItem>(`/api/folders/${folder.id}`, { name })
+      setPath((items) => items.map((item) => item.id === folder.id ? { ...item, name } : item))
+      notify('success', 'Папка переименована')
+      await refreshFolderBranch(folder.parentId)
+    } catch (error) { showError(error) }
+  }
+
+  async function createGroup(type: 'BOOKMARK' | 'NOTE') {
+    const name = window.prompt('Название новой группы')?.trim()
+    if (!name) return
+    try {
+      await api.post<ContentGroup>('/api/groups', { type, name })
+      notify('success', 'Группа создана')
+      await (type === 'BOOKMARK' ? loadBookmarks() : loadNotes())
+    } catch (error) { showError(error) }
+  }
+
+  async function renameGroup(group: ContentGroup) {
+    const name = window.prompt('Новое название группы', group.name)?.trim()
+    if (!name || name === group.name) return
+    try {
+      await api.patch<ContentGroup>(`/api/groups/${group.id}`, { type: group.type, name })
+      notify('success', 'Группа переименована')
+      await (group.type === 'BOOKMARK' ? loadBookmarks() : loadNotes())
+    } catch (error) { showError(error) }
+  }
+
+  function deleteGroup(group: ContentGroup) {
+    setConfirmAction({ title: 'Удалить группу?', text: `Группа «${group.name}» должна быть пустой.`, confirmText: 'Удалить группу', onConfirm: async () => {
+      try {
+        await api.delete(`/api/groups/${group.id}`)
+        if (group.type === 'BOOKMARK') setBookmarkGroup('all'); else setNoteGroup('all')
+        notify('success', 'Группа удалена')
+        await (group.type === 'BOOKMARK' ? loadBookmarks() : loadNotes())
+      } catch (error) { showError(error) }
+    }})
+  }
+
   function confirmDeleteFile(file: StoredFile) {
     setConfirmAction({
       title: 'Удалить файл?',
@@ -368,8 +423,9 @@ function App() {
         title: bookmarkForm.title.trim(),
         url: bookmarkForm.url.trim(),
         description: bookmarkForm.description.trim(),
+        groupId: bookmarkForm.groupId || null,
       })
-      setBookmarkForm({ title: '', url: '', description: '' })
+      setBookmarkForm({ title: '', url: '', description: '', groupId: bookmarkForm.groupId })
       notify('success', 'Закладка сохранена')
       await loadBookmarks()
     } catch (error) {
@@ -405,6 +461,7 @@ function App() {
         title: noteForm.title.trim(),
         content: noteForm.content.trim(),
         color: noteForm.color,
+        groupId: noteForm.groupId || null,
       }
       if (editingNoteId) {
         await api.patch<NoteItem>(`/api/notes/${editingNoteId}`, payload)
@@ -422,13 +479,13 @@ function App() {
 
   function editNote(note: NoteItem) {
     setEditingNoteId(note.id)
-    setNoteForm({ title: note.title, content: note.content, color: note.color })
+    setNoteForm({ title: note.title, content: note.content, color: note.color, groupId: note.groupId ?? '' })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function resetNoteForm() {
     setEditingNoteId(null)
-    setNoteForm({ title: '', content: '', color: 'white' })
+    setNoteForm({ title: '', content: '', color: 'white', groupId: noteForm.groupId })
   }
 
   function confirmDeleteNote(note: NoteItem) {
@@ -513,6 +570,10 @@ function App() {
             <button type="button" className="icon-action" onClick={() => openFolder(folder)}>
               <FolderOpen size={16} />
               Открыть
+            </button>
+            <button type="button" className="icon-action" onClick={() => void renameFolder(folder)}>
+              <Pencil size={16} />
+              Переименовать
             </button>
             <button type="button" className="icon-action danger" onClick={() => confirmDeleteFolder(folder)}>
               <Trash2 size={16} />
@@ -749,6 +810,18 @@ function App() {
               </button>
             </div>
 
+            <div className="group-actions">
+              <select value={bookmarkGroup} onChange={(event) => setBookmarkGroup(event.target.value)}>
+                <option value="all">Все группы</option><option value="ungrouped">Без группы</option>
+                {bookmarkGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
+              <button type="button" className="secondary-button" onClick={() => void createGroup('BOOKMARK')}><FolderPlus size={16} />Новая группа</button>
+              {bookmarkGroup !== 'all' && bookmarkGroup !== 'ungrouped' && <>
+                <button type="button" className="icon-action" onClick={() => void renameGroup(bookmarkGroups.find((g) => g.id === bookmarkGroup)!)}><Pencil size={16} /></button>
+                <button type="button" className="icon-action danger" onClick={() => deleteGroup(bookmarkGroups.find((g) => g.id === bookmarkGroup)!)}><Trash2 size={16} /></button>
+              </>}
+            </div>
+
             <form className="bookmark-form" onSubmit={createBookmark}>
               <input
                 value={bookmarkForm.title}
@@ -765,6 +838,9 @@ function App() {
                 onChange={(event) => setBookmarkForm((form) => ({ ...form, description: event.target.value }))}
                 placeholder="Описание"
               />
+              <select value={bookmarkForm.groupId} onChange={(event) => setBookmarkForm((form) => ({ ...form, groupId: event.target.value }))}>
+                <option value="">Без группы</option>{bookmarkGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
               <button type="submit">
                 <Plus size={17} />
                 Добавить
@@ -776,7 +852,7 @@ function App() {
                 <BookmarkSkeletonRows rows={3} />
               ) : (
                 <AnimatePresence initial={false}>
-                  {bookmarks.map((bookmark) => (
+                  {filteredBookmarks.map((bookmark) => (
                     <motion.article className="bookmark-item" key={bookmark.id} {...rowAnimation}>
                       <div className="bookmark-main">
                         <span className="bookmark-icon">
@@ -798,7 +874,7 @@ function App() {
                   ))}
                 </AnimatePresence>
               )}
-              {!isLoading && bookmarks.length === 0 && (
+              {!isLoading && filteredBookmarks.length === 0 && (
                 <EmptyState icon={<Bookmark size={30} />} text="Закладок пока нет" />
               )}
             </div>
@@ -829,6 +905,18 @@ function App() {
               </button>
             </div>
 
+            <div className="group-actions">
+              <select value={noteGroup} onChange={(event) => setNoteGroup(event.target.value)}>
+                <option value="all">Все группы</option><option value="ungrouped">Без группы</option>
+                {noteGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
+              <button type="button" className="secondary-button" onClick={() => void createGroup('NOTE')}><FolderPlus size={16} />Новая группа</button>
+              {noteGroup !== 'all' && noteGroup !== 'ungrouped' && <>
+                <button type="button" className="icon-action" onClick={() => void renameGroup(noteGroups.find((g) => g.id === noteGroup)!)}><Pencil size={16} /></button>
+                <button type="button" className="icon-action danger" onClick={() => deleteGroup(noteGroups.find((g) => g.id === noteGroup)!)}><Trash2 size={16} /></button>
+              </>}
+            </div>
+
             <form className="note-form" onSubmit={saveNote}>
               <div className="note-fields">
                 <input
@@ -843,6 +931,9 @@ function App() {
                   placeholder="Введите текст заметки"
                   rows={4}
                 />
+                <select value={noteForm.groupId} onChange={(event) => setNoteForm((form) => ({ ...form, groupId: event.target.value }))}>
+                  <option value="">Без группы</option>{noteGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                </select>
               </div>
               <div className="note-form-actions">
                 <fieldset className="color-picker">

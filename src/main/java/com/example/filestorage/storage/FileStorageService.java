@@ -76,7 +76,10 @@ public class FileStorageService {
                         size,
                         contentType,
                         OffsetDateTime.now()
-                )));
+                )))
+                .onErrorResume(exception -> Mono.fromRunnable(() -> deletePathQuietly(target))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .then(Mono.error(exception)));
     }
 
     public Mono<DownloadFile> download(UUID id) {
@@ -95,9 +98,9 @@ public class FileStorageService {
     public Mono<Void> delete(UUID id) {
         return storedFileRepository.findById(id)
                 .switchIfEmpty(Mono.error(new NotFoundException("Файл не найден")))
-                .flatMap(file -> storedFileRepository.delete(file)
-                        .then(Mono.<Void>fromRunnable(() -> deletePhysicalFile(file))
-                                .subscribeOn(Schedulers.boundedElastic())));
+                .flatMap(file -> Mono.<Void>fromRunnable(() -> deletePhysicalFile(file))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .then(storedFileRepository.delete(file)));
     }
 
     private void createDirectory(Path path) {
@@ -113,6 +116,14 @@ public class FileStorageService {
             Files.deleteIfExists(fileRoot.resolve(file.getStorageName()).normalize());
         } catch (Exception exception) {
             throw new BadRequestException("Не удалось удалить физический файл");
+        }
+    }
+
+    private void deletePathQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (Exception ignored) {
+            // Preserve the original storage error for the API caller.
         }
     }
 

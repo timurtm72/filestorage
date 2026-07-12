@@ -1,0 +1,50 @@
+# FileStorage
+
+Локальное веб-приложение для файлов, папок, закладок и заметок. Backend построен на Java 21, Spring WebFlux и PostgreSQL; frontend — на React, TypeScript и Vite.
+
+## Быстрый запуск для разработки
+
+Требуются Java 21, Node.js и Docker.
+
+```powershell
+docker compose up -d
+.\mvnw.cmd spring-boot:run
+```
+
+В другом терминале:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Приложение будет доступно на `http://localhost:5173`, API — на `http://localhost:8081`.
+
+## Локальный production-запуск
+
+Скопируйте `.env.example` в `.env`, обязательно замените пароль PostgreSQL и запустите:
+
+```powershell
+docker compose -f compose.prod.yaml up --build -d
+```
+
+Интерфейс будет доступен на `http://localhost:8080`. Порт, каталог загрузок и максимальный размер файла задаются в `.env`.
+
+## Данные
+
+- PostgreSQL хранит папки и метаданные.
+- Содержимое файлов хранится отдельно в каталоге `UPLOADS_PATH`.
+- Удаление или перенос каталога загрузок приведёт к потере содержимого файлов.
+- Перед обновлением рекомендуется сохранять дамп PostgreSQL и каталог загрузок вместе.
+
+## Проверка
+
+```powershell
+.\mvnw.cmd test
+cd frontend
+npm run lint
+npm run build
+```
+
+Подробнее об устройстве проекта см. в [ARCHITECTURE.md](ARCHITECTURE.md), история изменений находится в [CHANGELOG.md](CHANGELOG.md).

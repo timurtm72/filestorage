@@ -1,4 +1,6 @@
 package com.example.filestorage.bookmark;
 
-public record BookmarkRequest(String title, String url, String description) {
+import java.util.UUID;
+
+public record BookmarkRequest(String title, String url, String description, UUID groupId) {
 }

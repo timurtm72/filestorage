@@ -1,5 +1,10 @@
 HELP.md
 target/
+.mvn-local/
+.env
+*.log
+data/uploads/*
+!data/uploads/.gitkeep
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

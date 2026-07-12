@@ -6,6 +6,10 @@ CREATE TABLE IF NOT EXISTS folders (
     CONSTRAINT folders_unique_name_per_parent UNIQUE (parent_id, name)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS folders_unique_root_name_idx
+    ON folders(name)
+    WHERE parent_id IS NULL;
+
 CREATE TABLE IF NOT EXISTS stored_files (
     id UUID PRIMARY KEY,
     folder_id UUID REFERENCES folders(id) ON DELETE RESTRICT,
@@ -18,8 +22,17 @@ CREATE TABLE IF NOT EXISTS stored_files (
 
 CREATE INDEX IF NOT EXISTS stored_files_folder_id_idx ON stored_files(folder_id);
 
+CREATE TABLE IF NOT EXISTS content_groups (
+    id UUID PRIMARY KEY,
+    type VARCHAR(20) NOT NULL CHECK (type IN ('BOOKMARK', 'NOTE')),
+    name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    CONSTRAINT content_groups_unique_name UNIQUE (type, name)
+);
+
 CREATE TABLE IF NOT EXISTS bookmarks (
     id UUID PRIMARY KEY,
+    group_id UUID REFERENCES content_groups(id) ON DELETE RESTRICT,
     title VARCHAR(255) NOT NULL,
     url TEXT NOT NULL,
     description TEXT,
@@ -27,9 +40,12 @@ CREATE TABLE IF NOT EXISTS bookmarks (
 );
 
 CREATE INDEX IF NOT EXISTS bookmarks_created_at_idx ON bookmarks(created_at DESC);
+ALTER TABLE bookmarks ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES content_groups(id) ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS bookmarks_group_id_idx ON bookmarks(group_id);
 
 CREATE TABLE IF NOT EXISTS notes (
     id UUID PRIMARY KEY,
+    group_id UUID REFERENCES content_groups(id) ON DELETE RESTRICT,
     title VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
     color VARCHAR(20) NOT NULL,
@@ -38,3 +54,5 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 
 CREATE INDEX IF NOT EXISTS notes_updated_at_idx ON notes(updated_at DESC);
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES content_groups(id) ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS notes_group_id_idx ON notes(group_id);

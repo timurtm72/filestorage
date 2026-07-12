@@ -10,6 +10,7 @@ public class Bookmark {
 
     @Id
     private UUID id;
+    private UUID groupId;
     private String title;
     private String url;
     private String description;
@@ -18,8 +19,9 @@ public class Bookmark {
     public Bookmark() {
     }
 
-    public Bookmark(UUID id, String title, String url, String description, OffsetDateTime createdAt) {
+    public Bookmark(UUID id, UUID groupId, String title, String url, String description, OffsetDateTime createdAt) {
         this.id = id;
+        this.groupId = groupId;
         this.title = title;
         this.url = url;
         this.description = description;
@@ -33,6 +35,8 @@ public class Bookmark {
     public void setId(UUID id) {
         this.id = id;
     }
+    public UUID getGroupId() { return groupId; }
+    public void setGroupId(UUID groupId) { this.groupId = groupId; }
 
     public String getTitle() {
         return title;

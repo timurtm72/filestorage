@@ -185,6 +185,25 @@ button[type='submit'] {
   background: rgba(249, 251, 253, 0.72);
 }
 
+.group-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 18px;
+}
+
+.group-actions select,
+.bookmark-form select,
+.note-fields select {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 12px;
+}
+
 .breadcrumbs {
   display: flex;
   align-items: center;

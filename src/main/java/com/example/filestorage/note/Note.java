@@ -10,6 +10,7 @@ public class Note {
 
     @Id
     private UUID id;
+    private UUID groupId;
     private String title;
     private String content;
     private String color;
@@ -19,8 +20,9 @@ public class Note {
     public Note() {
     }
 
-    public Note(UUID id, String title, String content, String color, OffsetDateTime createdAt, OffsetDateTime updatedAt) {
+    public Note(UUID id, UUID groupId, String title, String content, String color, OffsetDateTime createdAt, OffsetDateTime updatedAt) {
         this.id = id;
+        this.groupId = groupId;
         this.title = title;
         this.content = content;
         this.color = color;
@@ -35,6 +37,8 @@ public class Note {
     public void setId(UUID id) {
         this.id = id;
     }
+    public UUID getGroupId() { return groupId; }
+    public void setGroupId(UUID groupId) { this.groupId = groupId; }
 
     public String getTitle() {
         return title;

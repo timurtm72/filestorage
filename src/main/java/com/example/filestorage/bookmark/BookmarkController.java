@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -25,8 +26,9 @@ public class BookmarkController {
     }
 
     @GetMapping
-    public Flux<Bookmark> list() {
-        return bookmarkService.list();
+    public Flux<Bookmark> list(@RequestParam(required = false) UUID groupId,
+            @RequestParam(defaultValue = "false") boolean ungrouped) {
+        return bookmarkService.list(groupId, ungrouped);
     }
 
     @PostMapping
