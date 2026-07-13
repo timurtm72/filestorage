@@ -5,6 +5,7 @@ import com.example.filestorage.shared.BadRequestException;
 import com.example.filestorage.shared.NotFoundException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.Normalizer;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.springframework.core.io.FileSystemResource;
@@ -57,8 +58,8 @@ public class FileStorageService {
                         .then();
 
         UUID id = UUID.randomUUID();
-        String originalName = sanitize(filePart.filename());
-        String storageName = id + "-" + originalName;
+        String originalName = normalizeOriginalName(filePart.filename());
+        String storageName = id.toString();
         Path target = fileRoot.resolve(storageName).normalize();
         String contentType = filePart.headers().getContentType() == null
                 ? MediaType.APPLICATION_OCTET_STREAM_VALUE
@@ -127,8 +128,14 @@ public class FileStorageService {
         }
     }
 
-    private String sanitize(String filename) {
-        String safeName = Path.of(filename).getFileName().toString().trim();
-        return safeName.replaceAll("[^a-zA-Z0-9._-]", "_");
+    private String normalizeOriginalName(String filename) {
+        String normalizedPath = filename.replace('\\', '/');
+        String name = normalizedPath.substring(normalizedPath.lastIndexOf('/') + 1).trim();
+        name = Normalizer.normalize(name, Normalizer.Form.NFC);
+        if (name.isBlank() || name.equals(".") || name.equals("..") || name.length() > 512
+                || name.codePoints().anyMatch(Character::isISOControl)) {
+            throw new BadRequestException("Некорректное имя файла");
+        }
+        return name;
     }
 }

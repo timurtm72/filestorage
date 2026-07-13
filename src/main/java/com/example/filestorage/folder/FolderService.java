@@ -4,6 +4,7 @@ import com.example.filestorage.shared.BadRequestException;
 import com.example.filestorage.shared.ConflictException;
 import com.example.filestorage.shared.NotFoundException;
 import com.example.filestorage.storage.StoredFileRepository;
+import java.text.Normalizer;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
@@ -81,6 +82,11 @@ public class FolderService {
         if (value == null || value.isBlank()) {
             throw new BadRequestException("Название папки обязательно");
         }
-        return value.trim();
+        String name = Normalizer.normalize(value.trim(), Normalizer.Form.NFC);
+        if (name.length() > 255 || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0
+                || name.codePoints().anyMatch(Character::isISOControl)) {
+            throw new BadRequestException("Некорректное название папки");
+        }
+        return name;
     }
 }

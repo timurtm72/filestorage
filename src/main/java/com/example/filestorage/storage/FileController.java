@@ -1,5 +1,6 @@
 package com.example.filestorage.storage;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -48,7 +49,7 @@ public class FileController {
         return fileStorageService.download(id)
                 .map(download -> ResponseEntity.ok()
                         .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
-                                .filename(download.metadata().getOriginalName())
+                                .filename(download.metadata().getOriginalName(), StandardCharsets.UTF_8)
                                 .build()
                                 .toString())
                         .contentType(MediaType.parseMediaType(download.metadata().getContentType()))

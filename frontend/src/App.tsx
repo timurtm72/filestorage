@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DragEvent, FormEvent, ReactNode } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { createPortal } from 'react-dom'
 import {
   AlertTriangle,
   Bookmark,
@@ -16,6 +17,7 @@ import {
   HardDrive,
   Home,
   Link,
+  MoreVertical,
   Pencil,
   Plus,
   RefreshCw,
@@ -93,6 +95,8 @@ type FolderContents = {
 }
 
 type ContentGroup = { id: string; type: 'BOOKMARK' | 'NOTE'; name: string; createdAt: string }
+type StorageModal = { parentId: string | null; parentName: string; folder?: FolderItem; folderOnly?: boolean }
+type GroupModal = { type: 'BOOKMARK' | 'NOTE'; group?: ContentGroup }
 
 const NOTE_COLORS: { value: NoteColor; label: string }[] = [
   { value: 'white', label: 'Белый' },
@@ -149,22 +153,29 @@ function App() {
   const [notes, setNotes] = useState<NoteItem[]>([])
   const [bookmarkGroups, setBookmarkGroups] = useState<ContentGroup[]>([])
   const [noteGroups, setNoteGroups] = useState<ContentGroup[]>([])
-  const [bookmarkGroup, setBookmarkGroup] = useState('all')
-  const [noteGroup, setNoteGroup] = useState('all')
+  const [expandedBookmarkGroups, setExpandedBookmarkGroups] = useState<Record<string, boolean>>({})
+  const [expandedNoteGroups, setExpandedNoteGroups] = useState<Record<string, boolean>>({})
   const [path, setPath] = useState<FolderPathItem[]>([{ id: null, name: 'Главная' }])
   const [folderName, setFolderName] = useState('')
+  const [storageModal, setStorageModal] = useState<StorageModal | null>(null)
+  const [storageAction, setStorageAction] = useState<'folder' | 'file'>('folder')
+  const [uploadFile, setUploadFile] = useState<globalThis.File | null>(null)
+  const [groupModal, setGroupModal] = useState<GroupModal | null>(null)
+  const [groupName, setGroupName] = useState('')
   const [bookmarkForm, setBookmarkForm] = useState({ title: '', url: '', description: '', groupId: '' })
   const [noteForm, setNoteForm] = useState<{ title: string; content: string; color: NoteColor; groupId: string }>({
     title: '',
     content: '',
     color: 'white', groupId: '',
   })
+  const [contentModal, setContentModal] = useState<'BOOKMARK' | 'NOTE' | null>(null)
+  const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null)
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const [noteSearch, setNoteSearch] = useState('')
   const [toasts, setToasts] = useState<Toast[]>([])
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [isDraggingFile, setIsDraggingFile] = useState(false)
   const [expandedFolders, setExpandedFolders] = useState<Record<string, FolderContents>>({})
   const [loadingFolders, setLoadingFolders] = useState<Record<string, boolean>>({})
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -179,16 +190,11 @@ function App() {
 
   const filteredNotes = useMemo(() => {
     const query = noteSearch.trim().toLocaleLowerCase('ru-RU')
-    const grouped = notes.filter((note) => noteGroup === 'all' || (noteGroup === 'ungrouped' ? !note.groupId : note.groupId === noteGroup))
-    if (!query) return grouped
-    return grouped.filter((note) =>
+    if (!query) return notes
+    return notes.filter((note) =>
       `${note.title} ${note.content}`.toLocaleLowerCase('ru-RU').includes(query),
     )
-  }, [noteSearch, notes, noteGroup])
-
-  const filteredBookmarks = useMemo(() => bookmarks.filter((bookmark) =>
-    bookmarkGroup === 'all' || (bookmarkGroup === 'ungrouped' ? !bookmark.groupId : bookmark.groupId === bookmarkGroup)
-  ), [bookmarks, bookmarkGroup])
+  }, [noteSearch, notes])
 
   useEffect(() => {
     void loadFilesView(currentFolderId)
@@ -202,6 +208,13 @@ function App() {
       void loadNotes()
     }
   }, [activeTab])
+
+  useEffect(() => {
+    if (!openMenu) return
+    const close = () => setOpenMenu(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [openMenu])
 
   async function loadFilesView(folderId: string | null) {
     setIsLoading(true)
@@ -267,7 +280,7 @@ function App() {
     setIsLoading(true)
     try {
       const [items, groups] = await Promise.all([api.get<BookmarkItem[]>('/api/bookmarks'), api.get<ContentGroup[]>('/api/groups?type=BOOKMARK')])
-      setBookmarks(items); setBookmarkGroups(groups)
+      setBookmarks(items.filter((item) => item.groupId)); setBookmarkGroups(groups)
     } catch (error) {
       showError(error)
     } finally {
@@ -279,7 +292,7 @@ function App() {
     setIsLoading(true)
     try {
       const [items, groups] = await Promise.all([api.get<NoteItem[]>('/api/notes'), api.get<ContentGroup[]>('/api/groups?type=NOTE')])
-      setNotes(items); setNoteGroups(groups)
+      setNotes(items.filter((item) => item.groupId)); setNoteGroups(groups)
     } catch (error) {
       showError(error)
     } finally {
@@ -287,45 +300,54 @@ function App() {
     }
   }
 
-  async function createFolder(event: FormEvent) {
-    event.preventDefault()
-    if (!folderName.trim()) {
-      return
-    }
-
-    try {
-      await api.post<FolderItem>('/api/folders', {
-        parentId: currentFolderId,
-        name: folderName.trim(),
-      })
-      setFolderName('')
-      notify('success', 'Папка создана')
-      await loadFilesView(currentFolderId)
-    } catch (error) {
-      showError(error)
-    }
+  function openStorageModal(parentId: string | null, parentName: string, folderOnly = false, action: 'folder' | 'file' = 'folder') {
+    setFolderName('')
+    setUploadFile(null)
+    setStorageAction(action)
+    setStorageModal({ parentId, parentName, folderOnly })
   }
 
-  async function uploadFile(file: File | undefined) {
-    if (!file) {
+  function openRenameFolder(folder: FolderItem) {
+    setFolderName(folder.name)
+    setStorageAction('folder')
+    setStorageModal({ parentId: folder.parentId, parentName: folder.name, folder })
+  }
+
+  async function refreshStorage(parentId: string | null) {
+    if (parentId === currentFolderId || !parentId) {
+      await loadFilesView(currentFolderId)
       return
     }
+    const contents = await getFolderContents(parentId)
+    setExpandedFolders((items) => ({ ...items, [parentId]: contents }))
+  }
 
-    const formData = new FormData()
-    formData.append('file', file)
-    const suffix = currentFolderId ? `?${new URLSearchParams({ folderId: currentFolderId })}` : ''
+  async function saveStorage(event: FormEvent) {
+    event.preventDefault()
+    if (!storageModal) return
 
     try {
-      const response = await fetch(`/api/files/upload${suffix}`, {
-        method: 'POST',
-        body: formData,
-      })
-      await parseResponse<StoredFile>(response)
-      notify('success', `Файл «${file.name}» загружен`)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''
+      if (storageModal.folder) {
+        if (!folderName.trim()) return
+        await api.patch<FolderItem>(`/api/folders/${storageModal.folder.id}`, { name: folderName.trim() })
+        setPath((items) => items.map((item) => item.id === storageModal.folder?.id ? { ...item, name: folderName.trim() } : item))
+        notify('success', 'Папка переименована')
+      } else if (storageAction === 'folder') {
+        if (!folderName.trim()) return
+        await api.post<FolderItem>('/api/folders', { parentId: storageModal.parentId, name: folderName.trim() })
+        notify('success', 'Папка создана')
+      } else {
+        const file = uploadFile
+        if (!file) return
+        const formData = new FormData()
+        formData.append('file', file)
+        const suffix = storageModal.parentId ? `?${new URLSearchParams({ folderId: storageModal.parentId })}` : ''
+        const response = await fetch(`/api/files/upload${suffix}`, { method: 'POST', body: formData })
+        await parseResponse<StoredFile>(response)
+        notify('success', `Файл «${file.name}» загружен`)
       }
-      await loadFilesView(currentFolderId)
+      setStorageModal(null)
+      await refreshStorage(storageModal.parentId)
     } catch (error) {
       showError(error)
     }
@@ -353,34 +375,25 @@ function App() {
     })
   }
 
-  async function renameFolder(folder: FolderItem) {
-    const name = window.prompt('Новое название папки', folder.name)?.trim()
-    if (!name || name === folder.name) return
-    try {
-      await api.patch<FolderItem>(`/api/folders/${folder.id}`, { name })
-      setPath((items) => items.map((item) => item.id === folder.id ? { ...item, name } : item))
-      notify('success', 'Папка переименована')
-      await refreshFolderBranch(folder.parentId)
-    } catch (error) { showError(error) }
+  function openGroupModal(type: 'BOOKMARK' | 'NOTE', group?: ContentGroup) {
+    setGroupName(group?.name ?? '')
+    setGroupModal({ type, group })
   }
 
-  async function createGroup(type: 'BOOKMARK' | 'NOTE') {
-    const name = window.prompt('Название новой группы')?.trim()
-    if (!name) return
+  async function saveGroup(event: FormEvent) {
+    event.preventDefault()
+    if (!groupModal || !groupName.trim()) return
     try {
-      await api.post<ContentGroup>('/api/groups', { type, name })
-      notify('success', 'Группа создана')
+      if (groupModal.group) {
+        await api.patch<ContentGroup>(`/api/groups/${groupModal.group.id}`, { type: groupModal.type, name: groupName.trim() })
+        notify('success', 'Группа переименована')
+      } else {
+        await api.post<ContentGroup>('/api/groups', { type: groupModal.type, name: groupName.trim() })
+        notify('success', 'Группа создана')
+      }
+      const type = groupModal.type
+      setGroupModal(null)
       await (type === 'BOOKMARK' ? loadBookmarks() : loadNotes())
-    } catch (error) { showError(error) }
-  }
-
-  async function renameGroup(group: ContentGroup) {
-    const name = window.prompt('Новое название группы', group.name)?.trim()
-    if (!name || name === group.name) return
-    try {
-      await api.patch<ContentGroup>(`/api/groups/${group.id}`, { type: group.type, name })
-      notify('success', 'Группа переименована')
-      await (group.type === 'BOOKMARK' ? loadBookmarks() : loadNotes())
     } catch (error) { showError(error) }
   }
 
@@ -388,11 +401,34 @@ function App() {
     setConfirmAction({ title: 'Удалить группу?', text: `Группа «${group.name}» должна быть пустой.`, confirmText: 'Удалить группу', onConfirm: async () => {
       try {
         await api.delete(`/api/groups/${group.id}`)
-        if (group.type === 'BOOKMARK') setBookmarkGroup('all'); else setNoteGroup('all')
         notify('success', 'Группа удалена')
         await (group.type === 'BOOKMARK' ? loadBookmarks() : loadNotes())
       } catch (error) { showError(error) }
     }})
+  }
+
+  function toggleGroup(type: 'BOOKMARK' | 'NOTE', id: string) {
+    const setExpanded = type === 'BOOKMARK' ? setExpandedBookmarkGroups : setExpandedNoteGroups
+    setExpanded((groups) => ({ ...groups, [id]: !(groups[id] ?? true) }))
+  }
+
+  function openCreateModal(type: 'BOOKMARK' | 'NOTE', groupId: string) {
+    if (type === 'BOOKMARK') {
+      setEditingBookmarkId(null)
+      setBookmarkForm({ title: '', url: '', description: '', groupId })
+      setExpandedBookmarkGroups((groups) => ({ ...groups, [groupId]: true }))
+    } else {
+      setEditingNoteId(null)
+      setNoteForm({ title: '', content: '', color: 'white', groupId })
+      setExpandedNoteGroups((groups) => ({ ...groups, [groupId]: true }))
+    }
+    setContentModal(type)
+  }
+
+  function closeContentModal() {
+    setContentModal(null)
+    setEditingBookmarkId(null)
+    setEditingNoteId(null)
   }
 
   function confirmDeleteFile(file: StoredFile) {
@@ -414,23 +450,35 @@ function App() {
 
   async function createBookmark(event: FormEvent) {
     event.preventDefault()
-    if (!bookmarkForm.title.trim() || !bookmarkForm.url.trim()) {
+    if (!bookmarkForm.title.trim() || !bookmarkForm.url.trim() || !bookmarkForm.groupId) {
       return
     }
 
     try {
-      await api.post<BookmarkItem>('/api/bookmarks', {
+      const payload = {
         title: bookmarkForm.title.trim(),
         url: bookmarkForm.url.trim(),
         description: bookmarkForm.description.trim(),
         groupId: bookmarkForm.groupId || null,
-      })
-      setBookmarkForm({ title: '', url: '', description: '', groupId: bookmarkForm.groupId })
-      notify('success', 'Закладка сохранена')
+      }
+      if (editingBookmarkId) {
+        await api.patch<BookmarkItem>(`/api/bookmarks/${editingBookmarkId}`, payload)
+        notify('success', 'Закладка обновлена')
+      } else {
+        await api.post<BookmarkItem>('/api/bookmarks', payload)
+        notify('success', 'Закладка сохранена')
+      }
+      closeContentModal()
       await loadBookmarks()
     } catch (error) {
       showError(error)
     }
+  }
+
+  function editBookmark(bookmark: BookmarkItem) {
+    setEditingBookmarkId(bookmark.id)
+    setBookmarkForm({ title: bookmark.title, url: bookmark.url, description: bookmark.description ?? '', groupId: bookmark.groupId ?? '' })
+    setContentModal('BOOKMARK')
   }
 
   function confirmDeleteBookmark(bookmark: BookmarkItem) {
@@ -452,7 +500,7 @@ function App() {
 
   async function saveNote(event: FormEvent) {
     event.preventDefault()
-    if (!noteForm.title.trim() || !noteForm.content.trim()) {
+    if (!noteForm.title.trim() || !noteForm.content.trim() || !noteForm.groupId) {
       return
     }
 
@@ -470,7 +518,7 @@ function App() {
         await api.post<NoteItem>('/api/notes', payload)
         notify('success', 'Заметка создана')
       }
-      resetNoteForm()
+      closeContentModal()
       await loadNotes()
     } catch (error) {
       showError(error)
@@ -480,12 +528,7 @@ function App() {
   function editNote(note: NoteItem) {
     setEditingNoteId(note.id)
     setNoteForm({ title: note.title, content: note.content, color: note.color, groupId: note.groupId ?? '' })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  function resetNoteForm() {
-    setEditingNoteId(null)
-    setNoteForm({ title: '', content: '', color: 'white', groupId: noteForm.groupId })
+    setContentModal('NOTE')
   }
 
   function confirmDeleteNote(note: NoteItem) {
@@ -497,7 +540,7 @@ function App() {
         try {
           await api.delete(`/api/notes/${note.id}`)
           if (editingNoteId === note.id) {
-            resetNoteForm()
+            closeContentModal()
           }
           notify('success', 'Заметка удалена')
           await loadNotes()
@@ -522,16 +565,12 @@ function App() {
         <span className="tree-name" style={{ paddingLeft: depth * 24 }}>{file.originalName}</span>
         <span>{formatBytes(file.sizeBytes)}</span>
         <span>{formatDate(file.createdAt)}</span>
-        <span className="row-actions">
-          <a className="icon-action" href={`/api/files/${file.id}/download`}>
-            <Download size={16} />
-            Скачать
-          </a>
-          <button type="button" className="icon-action danger" onClick={() => confirmDeleteFile(file)}>
-            <Trash2 size={16} />
-            Удалить
-          </button>
-        </span>
+        <div className="row-actions">
+          <ActionMenu id={`file-${file.id}`} openMenu={openMenu} setOpenMenu={setOpenMenu}>
+            <a href={`/api/files/${file.id}/download`}><Download size={16} />Скачать</a>
+            <button type="button" className="danger" onClick={() => confirmDeleteFile(file)}><Trash2 size={16} />Удалить</button>
+          </ActionMenu>
+        </div>
       </motion.div>
     )
   }
@@ -566,20 +605,15 @@ function App() {
           </button>
           <span>-</span>
           <span>{formatDate(folder.createdAt)}</span>
-          <span className="row-actions">
-            <button type="button" className="icon-action" onClick={() => openFolder(folder)}>
-              <FolderOpen size={16} />
-              Открыть
-            </button>
-            <button type="button" className="icon-action" onClick={() => void renameFolder(folder)}>
-              <Pencil size={16} />
-              Переименовать
-            </button>
-            <button type="button" className="icon-action danger" onClick={() => confirmDeleteFolder(folder)}>
-              <Trash2 size={16} />
-              Удалить
-            </button>
-          </span>
+          <div className="row-actions">
+            <ActionMenu id={`folder-${folder.id}`} openMenu={openMenu} setOpenMenu={setOpenMenu}>
+              <button type="button" onClick={() => openStorageModal(folder.id, folder.name, false, 'file')}><Upload size={16} />Загрузить файл</button>
+              <button type="button" onClick={() => openStorageModal(folder.id, folder.name, false, 'folder')}><FolderPlus size={16} />Создать папку</button>
+              <button type="button" onClick={() => openFolder(folder)}><FolderOpen size={16} />Открыть</button>
+              <button type="button" onClick={() => openRenameFolder(folder)}><Pencil size={16} />Переименовать</button>
+              <button type="button" className="danger" onClick={() => confirmDeleteFolder(folder)}><Trash2 size={16} />Удалить</button>
+            </ActionMenu>
+          </div>
         </motion.div>
 
         <AnimatePresence initial={false}>
@@ -607,24 +641,6 @@ function App() {
 
   function goToPath(index: number) {
     setPath((items) => items.slice(0, index + 1))
-  }
-
-  function handleDragOver(event: DragEvent<HTMLElement>) {
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'copy'
-    setIsDraggingFile(true)
-  }
-
-  function handleDragLeave(event: DragEvent<HTMLElement>) {
-    if (event.currentTarget === event.target) {
-      setIsDraggingFile(false)
-    }
-  }
-
-  function handleDrop(event: DragEvent<HTMLElement>) {
-    event.preventDefault()
-    setIsDraggingFile(false)
-    void uploadFile(event.dataTransfer.files[0])
   }
 
   function notify(type: ToastType, text: string) {
@@ -657,8 +673,7 @@ function App() {
         transition={{ duration: 0.35 }}
       >
         <div>
-          <p className="eyebrow">Файловое хранилище</p>
-          <h1>Хранилище файлов, закладок и заметок</h1>
+          <h1>{activeTab === 'files' ? 'Файлы' : activeTab === 'bookmarks' ? 'Закладки' : 'Заметки'}</h1>
         </div>
         <nav className="tabs" aria-label="Разделы">
           <button
@@ -700,30 +715,13 @@ function App() {
         {activeTab === 'files' ? (
           <motion.section
             key="files"
-            className={`workspace ${isDraggingFile ? 'dragging' : ''}`}
+            className="workspace"
             aria-label="Файловый менеджер"
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -12 }}
             transition={{ duration: 0.22 }}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
           >
-            <AnimatePresence>
-              {isDraggingFile && (
-                <motion.div
-                  className="drop-overlay"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                >
-                  <Upload size={42} />
-                  <strong>Отпустите файл для загрузки</strong>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
             <div className="toolbar">
               <div className="breadcrumbs" aria-label="Путь">
                 {path.map((item, index) => (
@@ -737,36 +735,11 @@ function App() {
                   </button>
                 ))}
               </div>
-              <button type="button" className="secondary-button" onClick={() => loadFilesView(currentFolderId)}>
-                <RefreshCw size={16} />
-                Обновить
-              </button>
+              <div className="toolbar-actions">
+                <button type="button" onClick={() => openStorageModal(currentFolderId, currentFolder.name, true)}><FolderPlus size={16} />Новая папка</button>
+                <button type="button" className="secondary-button" onClick={() => loadFilesView(currentFolderId)}><RefreshCw size={16} />Обновить</button>
+              </div>
             </div>
-
-            <form className="action-row" onSubmit={createFolder}>
-              <input
-                value={folderName}
-                onChange={(event) => setFolderName(event.target.value)}
-                placeholder="Название папки"
-              />
-              <button type="submit">
-                <FolderPlus size={17} />
-                Создать папку
-              </button>
-              <input
-                ref={fileInputRef}
-                className="file-input"
-                type="file"
-                onChange={(event) => uploadFile(event.target.files?.[0])}
-              />
-              <button type="button" className="upload-button" onClick={() => fileInputRef.current?.click()}>
-                <Upload size={17} />
-                Загрузить файл
-              </button>
-              <button type="button" className="drop-hint" onClick={() => fileInputRef.current?.click()}>
-                Перетащите файл сюда
-              </button>
-            </form>
 
             <div className="table">
               <div className="table-row table-head">
@@ -811,72 +784,55 @@ function App() {
             </div>
 
             <div className="group-actions">
-              <select value={bookmarkGroup} onChange={(event) => setBookmarkGroup(event.target.value)}>
-                <option value="all">Все группы</option><option value="ungrouped">Без группы</option>
-                {bookmarkGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-              </select>
-              <button type="button" className="secondary-button" onClick={() => void createGroup('BOOKMARK')}><FolderPlus size={16} />Новая группа</button>
-              {bookmarkGroup !== 'all' && bookmarkGroup !== 'ungrouped' && <>
-                <button type="button" className="icon-action" onClick={() => void renameGroup(bookmarkGroups.find((g) => g.id === bookmarkGroup)!)}><Pencil size={16} /></button>
-                <button type="button" className="icon-action danger" onClick={() => deleteGroup(bookmarkGroups.find((g) => g.id === bookmarkGroup)!)}><Trash2 size={16} /></button>
-              </>}
+              <button type="button" className="secondary-button" onClick={() => openGroupModal('BOOKMARK')}><FolderPlus size={16} />Новая группа</button>
             </div>
 
-            <form className="bookmark-form" onSubmit={createBookmark}>
-              <input
-                value={bookmarkForm.title}
-                onChange={(event) => setBookmarkForm((form) => ({ ...form, title: event.target.value }))}
-                placeholder="Название"
-              />
-              <input
-                value={bookmarkForm.url}
-                onChange={(event) => setBookmarkForm((form) => ({ ...form, url: event.target.value }))}
-                placeholder="https://site.ru"
-              />
-              <input
-                value={bookmarkForm.description}
-                onChange={(event) => setBookmarkForm((form) => ({ ...form, description: event.target.value }))}
-                placeholder="Описание"
-              />
-              <select value={bookmarkForm.groupId} onChange={(event) => setBookmarkForm((form) => ({ ...form, groupId: event.target.value }))}>
-                <option value="">Без группы</option>{bookmarkGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-              </select>
-              <button type="submit">
-                <Plus size={17} />
-                Добавить
-              </button>
-            </form>
-
-            <div className="bookmark-list">
+            <div className="content-groups">
               {isLoading && bookmarks.length === 0 ? (
                 <BookmarkSkeletonRows rows={3} />
               ) : (
-                <AnimatePresence initial={false}>
-                  {filteredBookmarks.map((bookmark) => (
-                    <motion.article className="bookmark-item" key={bookmark.id} {...rowAnimation}>
-                      <div className="bookmark-main">
-                        <span className="bookmark-icon">
-                          <Link size={18} />
-                        </span>
-                        <div>
-                          <a href={bookmark.url} target="_blank" rel="noreferrer">
-                            {bookmark.title}
-                            <ExternalLink size={15} />
-                          </a>
-                          <p>{bookmark.description || bookmark.url}</p>
-                        </div>
+                bookmarkGroups.map((group) => {
+                  const { id, name } = group
+                  const items = bookmarks.filter((bookmark) => bookmark.groupId === group.id)
+                  const expanded = expandedBookmarkGroups[id] ?? true
+                  return (
+                    <section className="content-group" key={id}>
+                      <div className="content-group-header">
+                        <button type="button" className="content-group-toggle" onClick={() => toggleGroup('BOOKMARK', id)} aria-expanded={expanded}>
+                          {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                          <span>{name}</span><small>{items.length}</small>
+                        </button>
+                        <ActionMenu id={`bookmark-group-${group.id}`} openMenu={openMenu} setOpenMenu={setOpenMenu}>
+                          <button type="button" onClick={() => openCreateModal('BOOKMARK', group.id)}><Plus size={16} />Добавить закладку</button>
+                          <button type="button" onClick={() => openGroupModal('BOOKMARK', group)}><Pencil size={16} />Переименовать</button>
+                          <button type="button" className="danger" onClick={() => deleteGroup(group)}><Trash2 size={16} />Удалить</button>
+                        </ActionMenu>
                       </div>
-                      <button type="button" className="icon-action danger" onClick={() => confirmDeleteBookmark(bookmark)}>
-                        <Trash2 size={16} />
-                        Удалить
-                      </button>
-                    </motion.article>
-                  ))}
-                </AnimatePresence>
+                      <AnimatePresence initial={false}>
+                        {expanded && <motion.div className="bookmark-list" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
+                          {items.map((bookmark) => (
+                            <motion.article className="bookmark-item" key={bookmark.id} {...rowAnimation}>
+                              <div className="bookmark-main">
+                                <span className="bookmark-icon"><Link size={18} /></span>
+                                <div>
+                                  <a href={bookmark.url} target="_blank" rel="noreferrer">{bookmark.title}<ExternalLink size={15} /></a>
+                                  <p>{bookmark.description || bookmark.url}</p>
+                                </div>
+                              </div>
+                              <ActionMenu id={`bookmark-${bookmark.id}`} openMenu={openMenu} setOpenMenu={setOpenMenu}>
+                                <button type="button" onClick={() => editBookmark(bookmark)}><Pencil size={16} />Изменить</button>
+                                <button type="button" className="danger" onClick={() => confirmDeleteBookmark(bookmark)}><Trash2 size={16} />Удалить</button>
+                              </ActionMenu>
+                            </motion.article>
+                          ))}
+                          {items.length === 0 && <div className="group-empty">В группе пока нет закладок</div>}
+                        </motion.div>}
+                      </AnimatePresence>
+                    </section>
+                  )
+                })
               )}
-              {!isLoading && filteredBookmarks.length === 0 && (
-                <EmptyState icon={<Bookmark size={30} />} text="Закладок пока нет" />
-              )}
+              {!isLoading && bookmarkGroups.length === 0 && <EmptyState icon={<Bookmark size={30} />} text="Групп пока нет" />}
             </div>
           </motion.section>
         ) : (
@@ -906,105 +862,204 @@ function App() {
             </div>
 
             <div className="group-actions">
-              <select value={noteGroup} onChange={(event) => setNoteGroup(event.target.value)}>
-                <option value="all">Все группы</option><option value="ungrouped">Без группы</option>
-                {noteGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-              </select>
-              <button type="button" className="secondary-button" onClick={() => void createGroup('NOTE')}><FolderPlus size={16} />Новая группа</button>
-              {noteGroup !== 'all' && noteGroup !== 'ungrouped' && <>
-                <button type="button" className="icon-action" onClick={() => void renameGroup(noteGroups.find((g) => g.id === noteGroup)!)}><Pencil size={16} /></button>
-                <button type="button" className="icon-action danger" onClick={() => deleteGroup(noteGroups.find((g) => g.id === noteGroup)!)}><Trash2 size={16} /></button>
-              </>}
+              <button type="button" className="secondary-button" onClick={() => openGroupModal('NOTE')}><FolderPlus size={16} />Новая группа</button>
             </div>
 
-            <form className="note-form" onSubmit={saveNote}>
-              <div className="note-fields">
-                <input
-                  value={noteForm.title}
-                  onChange={(event) => setNoteForm((form) => ({ ...form, title: event.target.value }))}
-                  placeholder="Заголовок заметки"
-                  maxLength={255}
-                />
-                <textarea
-                  value={noteForm.content}
-                  onChange={(event) => setNoteForm((form) => ({ ...form, content: event.target.value }))}
-                  placeholder="Введите текст заметки"
-                  rows={4}
-                />
-                <select value={noteForm.groupId} onChange={(event) => setNoteForm((form) => ({ ...form, groupId: event.target.value }))}>
-                  <option value="">Без группы</option>{noteGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-                </select>
-              </div>
-              <div className="note-form-actions">
-                <fieldset className="color-picker">
-                  <legend>Цвет заметки</legend>
-                  {NOTE_COLORS.map((color) => (
-                    <label key={color.value} title={color.label}>
-                      <input
-                        type="radio"
-                        name="note-color"
-                        value={color.value}
-                        checked={noteForm.color === color.value}
-                        onChange={() => setNoteForm((form) => ({ ...form, color: color.value }))}
-                      />
-                      <span className={`color-swatch ${color.value}`} />
-                    </label>
-                  ))}
-                </fieldset>
-                <div className="note-submit-actions">
-                  {editingNoteId && (
-                    <button type="button" className="secondary-button" onClick={resetNoteForm}>
-                      <X size={16} />
-                      Отменить
-                    </button>
-                  )}
-                  <button type="submit">
-                    {editingNoteId ? <Save size={17} /> : <Plus size={17} />}
-                    {editingNoteId ? 'Сохранить' : 'Создать заметку'}
-                  </button>
-                </div>
-              </div>
-            </form>
-
-            <div className="notes-grid">
+            <div className="content-groups">
               {isLoading && notes.length === 0 ? (
                 <NoteSkeletonCards cards={4} />
               ) : (
-                <AnimatePresence initial={false}>
-                  {filteredNotes.map((note) => (
-                    <motion.article className={`note-card ${note.color}`} key={note.id} {...rowAnimation}>
-                      <div className="note-card-header">
-                        <span className="note-card-icon"><StickyNote size={18} /></span>
-                        <time dateTime={note.updatedAt}>{formatDate(note.updatedAt)}</time>
-                      </div>
-                      <h3>{note.title}</h3>
-                      <p>{note.content}</p>
-                      <div className="note-card-actions">
-                        <button type="button" className="icon-action" onClick={() => editNote(note)}>
-                          <Pencil size={16} />
-                          Изменить
+                noteGroups.map((group) => {
+                  const { id, name } = group
+                  const items = filteredNotes.filter((note) => note.groupId === group.id)
+                  const expanded = expandedNoteGroups[id] ?? true
+                  return (
+                    <section className="content-group" key={id}>
+                      <div className="content-group-header">
+                        <button type="button" className="content-group-toggle" onClick={() => toggleGroup('NOTE', id)} aria-expanded={expanded}>
+                          {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                          <span>{name}</span><small>{items.length}</small>
                         </button>
-                        <button type="button" className="icon-action danger" onClick={() => confirmDeleteNote(note)}>
-                          <Trash2 size={16} />
-                          Удалить
-                        </button>
+                        <ActionMenu id={`note-group-${group.id}`} openMenu={openMenu} setOpenMenu={setOpenMenu}>
+                          <button type="button" onClick={() => openCreateModal('NOTE', group.id)}><Plus size={16} />Добавить заметку</button>
+                          <button type="button" onClick={() => openGroupModal('NOTE', group)}><Pencil size={16} />Переименовать</button>
+                          <button type="button" className="danger" onClick={() => deleteGroup(group)}><Trash2 size={16} />Удалить</button>
+                        </ActionMenu>
                       </div>
-                    </motion.article>
-                  ))}
-                </AnimatePresence>
+                      <AnimatePresence initial={false}>
+                        {expanded && <motion.div className="notes-grid" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
+                          {items.map((note) => (
+                            <motion.article className={`note-card ${note.color}`} key={note.id} {...rowAnimation}>
+                              <div className="note-card-header">
+                                <span className="note-card-icon"><StickyNote size={18} /></span>
+                                <time dateTime={note.updatedAt}>{formatDate(note.updatedAt)}</time>
+                              </div>
+                              <h3>{note.title}</h3><p>{note.content}</p>
+                              <div className="note-card-actions">
+                                <ActionMenu id={`note-${note.id}`} openMenu={openMenu} setOpenMenu={setOpenMenu}>
+                                  <button type="button" onClick={() => editNote(note)}><Pencil size={16} />Изменить</button>
+                                  <button type="button" className="danger" onClick={() => confirmDeleteNote(note)}><Trash2 size={16} />Удалить</button>
+                                </ActionMenu>
+                              </div>
+                            </motion.article>
+                          ))}
+                          {items.length === 0 && <div className="group-empty">{noteSearch ? 'Совпадений в группе нет' : 'В группе пока нет заметок'}</div>}
+                        </motion.div>}
+                      </AnimatePresence>
+                    </section>
+                  )
+                })
               )}
-              {!isLoading && notes.length === 0 && (
-                <EmptyState icon={<StickyNote size={30} />} text="Заметок пока нет" />
-              )}
-              {!isLoading && notes.length > 0 && filteredNotes.length === 0 && (
-                <EmptyState icon={<Search size={30} />} text="По вашему запросу ничего не найдено" />
-              )}
+              {!isLoading && noteGroups.length === 0 && <EmptyState icon={<StickyNote size={30} />} text="Групп пока нет" />}
             </div>
           </motion.section>
         )}
       </AnimatePresence>
 
       <ToastStack toasts={toasts} onClose={(id) => setToasts((items) => items.filter((item) => item.id !== id))} />
+
+      <AnimatePresence>
+        {groupModal && (
+          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setGroupModal(null)}>
+            <motion.form
+              className="content-modal group-modal"
+              onSubmit={saveGroup}
+              onClick={(event) => event.stopPropagation()}
+              initial={{ opacity: 0, y: 20, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.96 }}
+            >
+              <div className="content-modal-header">
+                <h2>{groupModal.group ? 'Переименовать группу' : 'Новая группа'}</h2>
+                <button type="button" className="icon-action" onClick={() => setGroupModal(null)}><X size={18} /></button>
+              </div>
+              <div className="modal-fields">
+                <input required autoFocus maxLength={255} value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Название группы" />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="secondary-button" onClick={() => setGroupModal(null)}>Отмена</button>
+                <button type="submit"><Save size={16} />{groupModal.group ? 'Сохранить' : 'Создать'}</button>
+              </div>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {storageModal && (
+          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setStorageModal(null)}>
+            <motion.form
+              className="content-modal"
+              onSubmit={saveStorage}
+              onClick={(event) => event.stopPropagation()}
+              initial={{ opacity: 0, y: 20, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.96 }}
+            >
+              <div className="content-modal-header">
+                <h2>{storageModal.folder
+                  ? 'Переименовать папку'
+                  : storageAction === 'file'
+                    ? `Загрузить файл в «${storageModal.parentName}»`
+                    : storageModal.folderOnly ? 'Новая папка' : `Новая папка в «${storageModal.parentName}»`}</h2>
+                <button type="button" className="icon-action" onClick={() => setStorageModal(null)}><X size={18} /></button>
+              </div>
+
+              <div className="modal-fields">
+                {storageModal.folder || storageAction === 'folder' ? (
+                  <input required maxLength={255} autoFocus value={folderName} onChange={(event) => setFolderName(event.target.value)} placeholder="Название папки" />
+                ) : (
+                  <div
+                    className={`upload-dropzone ${uploadFile ? 'selected' : ''}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => fileInputRef.current?.click()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') fileInputRef.current?.click()
+                    }}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      setUploadFile(event.dataTransfer.files[0] ?? null)
+                    }}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      className="upload-file-input"
+                      type="file"
+                      onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+                    />
+                    <span className="upload-dropzone-icon"><Upload size={28} /></span>
+                    <strong>{uploadFile?.name ?? 'Перетащите файл сюда'}</strong>
+                    <span>{uploadFile ? formatBytes(uploadFile.size) : 'или нажмите, чтобы выбрать'}</span>
+                    <span className="upload-file-button">Выбрать файл</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-actions">
+                <button type="button" className="secondary-button" onClick={() => setStorageModal(null)}>Отмена</button>
+                <button type="submit" disabled={storageAction === 'file' && !uploadFile}>
+                  {storageAction === 'file' ? <Upload size={16} /> : storageModal.folder ? <Save size={16} /> : <FolderPlus size={16} />}
+                  {storageModal.folder ? 'Сохранить' : storageAction === 'folder' ? 'Создать папку' : 'Загрузить файл'}
+                </button>
+              </div>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {contentModal && (
+          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeContentModal}>
+            <motion.form
+              className="content-modal"
+              onSubmit={contentModal === 'BOOKMARK' ? createBookmark : saveNote}
+              onClick={(event) => event.stopPropagation()}
+              initial={{ opacity: 0, y: 20, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.96 }}
+            >
+              <div className="content-modal-header">
+                <h2>{contentModal === 'BOOKMARK'
+                  ? editingBookmarkId ? 'Редактировать закладку' : 'Новая закладка'
+                  : editingNoteId ? 'Редактировать заметку' : 'Новая заметка'}</h2>
+                <button type="button" className="icon-action" onClick={closeContentModal}><X size={18} /></button>
+              </div>
+              <p className="modal-group-label">Группа: <strong>{contentModal === 'BOOKMARK'
+                ? bookmarkGroups.find((group) => group.id === bookmarkForm.groupId)?.name
+                : noteGroups.find((group) => group.id === noteForm.groupId)?.name}</strong></p>
+
+              {contentModal === 'BOOKMARK' ? <div className="modal-fields">
+                <input required maxLength={255} value={bookmarkForm.title} onChange={(event) => setBookmarkForm((form) => ({ ...form, title: event.target.value }))} placeholder="Название" />
+                <input required value={bookmarkForm.url} onChange={(event) => setBookmarkForm((form) => ({ ...form, url: event.target.value }))} placeholder="https://site.ru" />
+                <textarea rows={3} value={bookmarkForm.description} onChange={(event) => setBookmarkForm((form) => ({ ...form, description: event.target.value }))} placeholder="Описание" />
+                {editingBookmarkId && <select value={bookmarkForm.groupId} onChange={(event) => setBookmarkForm((form) => ({ ...form, groupId: event.target.value }))}>
+                  {bookmarkGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                </select>}
+              </div> : <div className="modal-fields">
+                <input required maxLength={255} value={noteForm.title} onChange={(event) => setNoteForm((form) => ({ ...form, title: event.target.value }))} placeholder="Заголовок заметки" />
+                <textarea required rows={6} value={noteForm.content} onChange={(event) => setNoteForm((form) => ({ ...form, content: event.target.value }))} placeholder="Текст заметки" />
+                {editingNoteId && <select value={noteForm.groupId} onChange={(event) => setNoteForm((form) => ({ ...form, groupId: event.target.value }))}>
+                  {noteGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                </select>}
+                <fieldset className="color-picker">
+                  <legend>Цвет заметки</legend>
+                  {NOTE_COLORS.map((color) => <label key={color.value} title={color.label}>
+                    <input type="radio" name="note-color" value={color.value} checked={noteForm.color === color.value} onChange={() => setNoteForm((form) => ({ ...form, color: color.value }))} />
+                    <span className={`color-swatch ${color.value}`} />
+                  </label>)}
+                </fieldset>
+              </div>}
+
+              <div className="modal-actions">
+                <button type="button" className="secondary-button" onClick={closeContentModal}>Отмена</button>
+                <button type="submit"><Save size={16} />{editingBookmarkId || editingNoteId ? 'Сохранить' : 'Добавить'}</button>
+              </div>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {confirmAction && (
@@ -1042,6 +1097,80 @@ const rowAnimation = {
   animate: { opacity: 1, y: 0, scale: 1 },
   exit: { opacity: 0, y: -8, scale: 0.99 },
   transition: { duration: 0.18 },
+}
+
+function ActionMenu({ id, openMenu, setOpenMenu, children }: {
+  id: string
+  openMenu: string | null
+  setOpenMenu: (id: string | null) => void
+  children: ReactNode
+}) {
+  const open = openMenu === id
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
+
+  useEffect(() => {
+    if (!open) {
+      setPosition(null)
+      return
+    }
+
+    const updatePosition = () => {
+      const trigger = triggerRef.current
+      const menu = menuRef.current
+      if (!trigger || !menu) return
+      const rect = trigger.getBoundingClientRect()
+      const width = menu.offsetWidth
+      const height = menu.offsetHeight
+      const below = rect.bottom + 6
+      const above = rect.top - height - 6
+      const top = below + height <= window.innerHeight - 8 || above < 8
+        ? Math.min(below, window.innerHeight - height - 8)
+        : above
+      const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))
+      setPosition({ top: Math.max(8, top), left })
+    }
+
+    const frame = requestAnimationFrame(updatePosition)
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [open])
+
+  return (
+    <div className="action-menu">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="action-menu-trigger"
+        aria-label="Действия"
+        aria-expanded={open}
+        onClick={(event) => {
+          event.stopPropagation()
+          setOpenMenu(open ? null : id)
+        }}
+      >
+        <MoreVertical size={19} />
+      </button>
+      {createPortal(<AnimatePresence>
+        {open && <motion.div
+          ref={menuRef}
+          className="action-menu-popover"
+          style={{ top: position?.top ?? 0, left: position?.left ?? 0, visibility: position ? 'visible' : 'hidden' }}
+          initial={{ opacity: 0, scale: 0.97 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.97 }}
+        >
+          {children}
+        </motion.div>}
+      </AnimatePresence>, document.body)}
+    </div>
+  )
 }
 
 function StatCard({ icon, label, value }: { icon: ReactNode; label: string; value: string | number }) {
