@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent, InputHTMLAttributes, ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { createPortal } from 'react-dom'
 import {
@@ -9,6 +9,8 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  Eye,
+  EyeOff,
   ExternalLink,
   File,
   Folder,
@@ -17,6 +19,8 @@ import {
   HardDrive,
   Home,
   Link,
+  LockKeyhole,
+  LogOut,
   MoreVertical,
   Pencil,
   Plus,
@@ -26,6 +30,7 @@ import {
   StickyNote,
   Trash2,
   Upload,
+  User,
   X,
 } from 'lucide-react'
 import './App.css'
@@ -97,6 +102,7 @@ type FolderContents = {
 type ContentGroup = { id: string; type: 'BOOKMARK' | 'NOTE'; name: string; createdAt: string }
 type StorageModal = { parentId: string | null; parentName: string; folder?: FolderItem; folderOnly?: boolean }
 type GroupModal = { type: 'BOOKMARK' | 'NOTE'; group?: ContentGroup }
+type AuthUser = { id: string; email: string }
 
 const NOTE_COLORS: { value: NoteColor; label: string }[] = [
   { value: 'white', label: 'Белый' },
@@ -106,29 +112,45 @@ const NOTE_COLORS: { value: NoteColor; label: string }[] = [
   { value: 'rose', label: 'Розовый' },
 ]
 
+let csrfToken = ''
+let csrfHeader = 'X-XSRF-TOKEN'
+
+async function ensureCsrf() {
+  if (csrfToken) return
+  const response = await fetch('/api/auth/csrf', { credentials: 'include' })
+  const payload = await parseResponse<{ token: string; headerName: string }>(response)
+  csrfToken = payload.token
+  csrfHeader = payload.headerName
+}
+
 const api = {
   async get<T>(url: string): Promise<T> {
-    const response = await fetch(url)
+    const response = await fetch(url, { credentials: 'include' })
     return parseResponse<T>(response)
   },
   async post<T>(url: string, body: unknown): Promise<T> {
+    await ensureCsrf()
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', [csrfHeader]: csrfToken },
       body: JSON.stringify(body),
     })
     return parseResponse<T>(response)
   },
   async patch<T>(url: string, body: unknown): Promise<T> {
+    await ensureCsrf()
     const response = await fetch(url, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', [csrfHeader]: csrfToken },
       body: JSON.stringify(body),
     })
     return parseResponse<T>(response)
   },
   async delete(url: string): Promise<void> {
-    const response = await fetch(url, { method: 'DELETE' })
+    await ensureCsrf()
+    const response = await fetch(url, { method: 'DELETE', credentials: 'include', headers: { [csrfHeader]: csrfToken } })
     await parseResponse<void>(response)
   },
 }
@@ -142,10 +164,15 @@ async function parseResponse<T>(response: Response): Promise<T> {
   }
 
   const payload = await response.json().catch(() => null)
+  if (response.status === 401) window.dispatchEvent(new Event('auth-required'))
   throw new Error(payload?.message ?? 'Ошибка запроса')
 }
 
 function App() {
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
+  const [authReady, setAuthReady] = useState(false)
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' })
   const [activeTab, setActiveTab] = useState<Tab>('files')
   const [folders, setFolders] = useState<FolderItem[]>([])
   const [files, setFiles] = useState<StoredFile[]>([])
@@ -197,17 +224,36 @@ function App() {
   }, [noteSearch, notes])
 
   useEffect(() => {
-    void loadFilesView(currentFolderId)
-  }, [currentFolderId])
+    const initialize = async () => {
+      try {
+        await ensureCsrf()
+        const response = await fetch('/api/auth/me', { credentials: 'include' })
+        if (response.ok) setCurrentUser(await response.json())
+      } catch {
+        setCurrentUser(null)
+      } finally {
+        setAuthReady(true)
+      }
+    }
+    const requireAuth = () => setCurrentUser(null)
+    window.addEventListener('auth-required', requireAuth)
+    void initialize()
+    return () => window.removeEventListener('auth-required', requireAuth)
+  }, [])
 
   useEffect(() => {
+    if (currentUser) void loadFilesView(currentFolderId)
+  }, [currentFolderId, currentUser])
+
+  useEffect(() => {
+    if (!currentUser) return
     if (activeTab === 'bookmarks') {
       void loadBookmarks()
     }
     if (activeTab === 'notes') {
       void loadNotes()
     }
-  }, [activeTab])
+  }, [activeTab, currentUser])
 
   useEffect(() => {
     if (!openMenu) return
@@ -342,7 +388,10 @@ function App() {
         const formData = new FormData()
         formData.append('file', file)
         const suffix = storageModal.parentId ? `?${new URLSearchParams({ folderId: storageModal.parentId })}` : ''
-        const response = await fetch(`/api/files/upload${suffix}`, { method: 'POST', body: formData })
+        await ensureCsrf()
+        const response = await fetch(`/api/files/upload${suffix}`, {
+          method: 'POST', credentials: 'include', headers: { [csrfHeader]: csrfToken }, body: formData,
+        })
         await parseResponse<StoredFile>(response)
         notify('success', `Файл «${file.name}» загружен`)
       }
@@ -664,6 +713,37 @@ function App() {
     await action.onConfirm()
   }
 
+  async function logout() {
+    try {
+      await api.post<void>('/api/auth/logout', {})
+    } finally {
+      setCurrentUser(null)
+      setFolders([]); setFiles([]); setBookmarks([]); setNotes([])
+      setBookmarkGroups([]); setNoteGroups([])
+      setPath([{ id: null, name: 'Главная' }])
+    }
+  }
+
+  async function changePassword(event: FormEvent) {
+    event.preventDefault()
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      notify('error', 'Новые пароли не совпадают')
+      return
+    }
+    try {
+      await api.post<void>('/api/auth/change-password', {
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      })
+      setChangePasswordOpen(false)
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+      setCurrentUser(null)
+    } catch (error) { showError(error) }
+  }
+
+  if (!authReady) return <div className="auth-loading"><RefreshCw className="spin" size={28} />Загрузка</div>
+  if (!currentUser) return <AuthScreen onLogin={setCurrentUser} />
+
   return (
     <main className="app-shell">
       <motion.header
@@ -675,6 +755,7 @@ function App() {
         <div>
           <h1>{activeTab === 'files' ? 'Файлы' : activeTab === 'bookmarks' ? 'Закладки' : 'Заметки'}</h1>
         </div>
+        <div className="topbar-controls">
         <nav className="tabs" aria-label="Разделы">
           <button
             type="button"
@@ -701,6 +782,14 @@ function App() {
             Заметки
           </button>
         </nav>
+        <div className="account-control">
+          <User size={17} /><span>{currentUser.email}</span>
+          <ActionMenu id="account" openMenu={openMenu} setOpenMenu={setOpenMenu}>
+            <button type="button" onClick={() => setChangePasswordOpen(true)}><LockKeyhole size={16} />Изменить пароль</button>
+            <button type="button" className="danger" onClick={() => void logout()}><LogOut size={16} />Выйти</button>
+          </ActionMenu>
+        </div>
+        </div>
       </motion.header>
 
       <section className="status-grid" aria-label="Статистика">
@@ -917,6 +1006,33 @@ function App() {
       </AnimatePresence>
 
       <ToastStack toasts={toasts} onClose={(id) => setToasts((items) => items.filter((item) => item.id !== id))} />
+
+      <AnimatePresence>
+        {changePasswordOpen && (
+          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setChangePasswordOpen(false)}>
+            <motion.form className="content-modal group-modal" onSubmit={changePassword} onClick={(event) => event.stopPropagation()}
+              initial={{ opacity: 0, y: 20, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: 0.96 }}>
+              <div className="content-modal-header">
+                <h2>Изменить пароль</h2>
+                <button type="button" className="icon-action" onClick={() => setChangePasswordOpen(false)}><X size={18} /></button>
+              </div>
+              <div className="modal-fields">
+                <PasswordInput required autoComplete="current-password" value={passwordForm.currentPassword}
+                  onChange={(event) => setPasswordForm((form) => ({ ...form, currentPassword: event.target.value }))} placeholder="Текущий пароль" />
+                <PasswordInput required autoComplete="new-password" value={passwordForm.newPassword}
+                  onChange={(event) => setPasswordForm((form) => ({ ...form, newPassword: event.target.value }))} placeholder="Новый пароль" />
+                <PasswordInput required autoComplete="new-password" value={passwordForm.confirmPassword}
+                  onChange={(event) => setPasswordForm((form) => ({ ...form, confirmPassword: event.target.value }))} placeholder="Повторите новый пароль" />
+                <small className="form-hint">Минимум 10 символов: заглавная и строчная буквы, цифра.</small>
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="secondary-button" onClick={() => setChangePasswordOpen(false)}>Отмена</button>
+                <button type="submit"><Save size={16} />Сохранить</button>
+              </div>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {groupModal && (
@@ -1171,6 +1287,113 @@ function ActionMenu({ id, openMenu, setOpenMenu, children }: {
       </AnimatePresence>, document.body)}
     </div>
   )
+}
+
+function AuthScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
+  const [mode, setMode] = useState<'login' | 'register' | 'registerVerify' | 'loginVerify'>('login')
+  const [form, setForm] = useState({ email: '', password: '', confirmPassword: '' })
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get('token')
+    if (!token) return
+    setBusy(true)
+    const loginConfirmation = window.location.pathname.endsWith('/verify-login')
+    api.post<AuthUser | { message: string }>(loginConfirmation ? '/api/auth/confirm-login' : '/api/auth/verify-email', { token })
+      .then((result) => {
+        if (loginConfirmation) onLogin(result as AuthUser)
+        else { setMessage(`${(result as { message: string }).message}. Теперь войдите.`); setMode('login') }
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : 'Не удалось подтвердить ссылку'))
+      .finally(() => {
+        window.history.replaceState({}, '', '/')
+        setBusy(false)
+      })
+  }, [])
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setError(''); setMessage(''); setBusy(true)
+    try {
+      if (mode === 'login') {
+        const result = await api.post<{ message: string; user: AuthUser | null; confirmationRequired: boolean }>(
+          '/api/auth/login', { email: form.email, password: form.password },
+        )
+        if (result.user) {
+          onLogin(result.user)
+          return
+        }
+        setMessage(result.message)
+        setMode('loginVerify')
+      } else {
+        if (form.password !== form.confirmPassword) throw new Error('Пароли не совпадают')
+        const result = await api.post<{ message: string; confirmationRequired: boolean }>(
+          '/api/auth/register', { email: form.email, password: form.password },
+        )
+        setMessage(result.message)
+        setMode(result.confirmationRequired ? 'registerVerify' : 'login')
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Ошибка запроса')
+    } finally { setBusy(false) }
+  }
+
+  async function resend() {
+    setError(''); setBusy(true)
+    try {
+      const result = await api.post<{ message: string }>('/api/auth/resend-verification', { email: form.email })
+      setMessage(result.message)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Ошибка запроса') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <main className="auth-page">
+      <motion.section className="auth-card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
+        <span className="auth-icon"><HardDrive size={28} /></span>
+        <h1>{mode === 'login' ? 'Вход' : mode === 'register' ? 'Регистрация' : mode === 'loginVerify' ? 'Подтвердите вход' : 'Подтвердите email'}</h1>
+        <p>{mode.endsWith('Verify') ? `Мы отправили ссылку на ${form.email}` : 'Хранилище файлов, заметок и закладок'}</p>
+
+        {(mode === 'login' || mode === 'register') && <form className="auth-form" onSubmit={submit}>
+          <input required type="email" autoComplete="email" value={form.email}
+            onChange={(event) => setForm((value) => ({ ...value, email: event.target.value }))} placeholder="Email" />
+          <PasswordInput required autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={form.password}
+            onChange={(event) => setForm((value) => ({ ...value, password: event.target.value }))} placeholder="Пароль" />
+          {mode === 'register' && <>
+            <PasswordInput required autoComplete="new-password" value={form.confirmPassword}
+              onChange={(event) => setForm((value) => ({ ...value, confirmPassword: event.target.value }))} placeholder="Повторите пароль" />
+            <small className="form-hint">Минимум 10 символов: заглавная и строчная буквы, цифра.</small>
+          </>}
+          {error && <div className="auth-alert error">{error}</div>}
+          {message && <div className="auth-alert success">{message}</div>}
+          <button type="submit" disabled={busy}>{busy && <RefreshCw className="spin" size={16} />}{mode === 'login' ? 'Войти' : 'Создать аккаунт'}</button>
+        </form>}
+
+        {mode.endsWith('Verify') && <div className="auth-form">
+          {error && <div className="auth-alert error">{error}</div>}
+          {message && <div className="auth-alert success">{message}</div>}
+          {mode === 'registerVerify' && <button type="button" disabled={busy} onClick={() => void resend()}>Отправить письмо повторно</button>}
+        </div>}
+
+        <button type="button" className="auth-switch" onClick={() => {
+          setError(''); setMessage(''); setMode(mode === 'login' ? 'register' : 'login')
+        }}>{mode === 'login' ? 'Нет аккаунта? Зарегистрироваться' : 'Вернуться ко входу'}</button>
+      </motion.section>
+    </main>
+  )
+}
+
+function PasswordInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  const [visible, setVisible] = useState(false)
+  return <div className="password-field">
+    <input {...props} type={visible ? 'text' : 'password'} />
+    <button type="button" aria-label={visible ? 'Скрыть пароль' : 'Показать пароль'}
+      title={visible ? 'Скрыть пароль' : 'Показать пароль'} onClick={() => setVisible((value) => !value)}>
+      {visible ? <Eye size={18} /> : <EyeOff size={18} />}
+    </button>
+  </div>
 }
 
 function StatCard({ icon, label, value }: { icon: ReactNode; label: string; value: string | number }) {

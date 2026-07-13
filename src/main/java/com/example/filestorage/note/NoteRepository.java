@@ -7,8 +7,9 @@ import reactor.core.publisher.Mono;
 
 public interface NoteRepository extends ReactiveCrudRepository<Note, UUID> {
 
-    Flux<Note> findAllByOrderByUpdatedAtDesc();
-    Flux<Note> findByGroupIdOrderByUpdatedAtDesc(UUID groupId);
-    Flux<Note> findByGroupIdIsNullOrderByUpdatedAtDesc();
-    Mono<Long> countByGroupId(UUID groupId);
+    Flux<Note> findByOwnerIdOrderByUpdatedAtDesc(UUID ownerId);
+    Flux<Note> findByOwnerIdAndGroupIdOrderByUpdatedAtDesc(UUID ownerId, UUID groupId);
+    Flux<Note> findByOwnerIdAndGroupIdIsNullOrderByUpdatedAtDesc(UUID ownerId);
+    Mono<Note> findByIdAndOwnerId(UUID id, UUID ownerId);
+    Mono<Long> countByOwnerIdAndGroupId(UUID ownerId, UUID groupId);
 }

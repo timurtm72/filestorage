@@ -7,8 +7,9 @@ import reactor.core.publisher.Mono;
 
 public interface BookmarkRepository extends ReactiveCrudRepository<Bookmark, UUID> {
 
-    Flux<Bookmark> findAllByOrderByCreatedAtDesc();
-    Flux<Bookmark> findByGroupIdOrderByCreatedAtDesc(UUID groupId);
-    Flux<Bookmark> findByGroupIdIsNullOrderByCreatedAtDesc();
-    Mono<Long> countByGroupId(UUID groupId);
+    Flux<Bookmark> findByOwnerIdOrderByCreatedAtDesc(UUID ownerId);
+    Flux<Bookmark> findByOwnerIdAndGroupIdOrderByCreatedAtDesc(UUID ownerId, UUID groupId);
+    Flux<Bookmark> findByOwnerIdAndGroupIdIsNullOrderByCreatedAtDesc(UUID ownerId);
+    Mono<Bookmark> findByIdAndOwnerId(UUID id, UUID ownerId);
+    Mono<Long> countByOwnerIdAndGroupId(UUID ownerId, UUID groupId);
 }

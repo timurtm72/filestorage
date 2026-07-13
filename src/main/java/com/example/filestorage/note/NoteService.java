@@ -26,25 +26,26 @@ public class NoteService {
         this.groupRepository = groupRepository;
     }
 
-    public Flux<Note> list(UUID groupId, boolean ungrouped) {
-        if (ungrouped) return noteRepository.findByGroupIdIsNullOrderByUpdatedAtDesc();
-        return groupId == null ? noteRepository.findAllByOrderByUpdatedAtDesc() : noteRepository.findByGroupIdOrderByUpdatedAtDesc(groupId);
+    public Flux<Note> list(UUID ownerId, UUID groupId, boolean ungrouped) {
+        if (ungrouped) return noteRepository.findByOwnerIdAndGroupIdIsNullOrderByUpdatedAtDesc(ownerId);
+        return groupId == null ? noteRepository.findByOwnerIdOrderByUpdatedAtDesc(ownerId)
+                : noteRepository.findByOwnerIdAndGroupIdOrderByUpdatedAtDesc(ownerId, groupId);
     }
 
-    public Mono<Note> create(NoteRequest request) {
+    public Mono<Note> create(UUID ownerId, NoteRequest request) {
         String title = normalizeRequired(request.title(), "Заголовок обязателен");
         String content = normalizeRequired(request.content(), "Текст заметки обязателен");
         String color = normalizeColor(request.color());
         OffsetDateTime now = OffsetDateTime.now();
-        return validateGroup(request.groupId(), "NOTE").then(entityTemplate.insert(
-                new Note(UUID.randomUUID(), request.groupId(), title, content, color, now, now)));
+        return validateGroup(ownerId, request.groupId(), "NOTE").then(entityTemplate.insert(
+                new Note(UUID.randomUUID(), ownerId, request.groupId(), title, content, color, now, now)));
     }
 
-    public Mono<Note> update(UUID id, NoteRequest request) {
+    public Mono<Note> update(UUID ownerId, UUID id, NoteRequest request) {
         String title = normalizeRequired(request.title(), "Заголовок обязателен");
         String content = normalizeRequired(request.content(), "Текст заметки обязателен");
         String color = normalizeColor(request.color());
-        return noteRepository.findById(id)
+        return noteRepository.findByIdAndOwnerId(id, ownerId)
                 .switchIfEmpty(Mono.error(new NotFoundException("Заметка не найдена")))
                 .flatMap(note -> {
                     note.setTitle(title);
@@ -52,21 +53,20 @@ public class NoteService {
                     note.setColor(color);
                     note.setGroupId(request.groupId());
                     note.setUpdatedAt(OffsetDateTime.now());
-                    return validateGroup(request.groupId(), "NOTE").then(noteRepository.save(note));
+                    return validateGroup(ownerId, request.groupId(), "NOTE").then(noteRepository.save(note));
                 });
     }
 
-    private Mono<Void> validateGroup(UUID groupId, String type) {
-        if (groupId == null) return Mono.empty();
-        return groupRepository.findById(groupId).filter(group -> type.equals(group.getType()))
+    private Mono<Void> validateGroup(UUID ownerId, UUID groupId, String type) {
+        if (groupId == null) return Mono.error(new BadRequestException("Группа обязательна"));
+        return groupRepository.findByIdAndOwnerId(groupId, ownerId).filter(group -> type.equals(group.getType()))
                 .switchIfEmpty(Mono.error(new BadRequestException("Группа не найдена"))).then();
     }
 
-    public Mono<Void> delete(UUID id) {
-        return noteRepository.existsById(id)
-                .filter(Boolean::booleanValue)
+    public Mono<Void> delete(UUID ownerId, UUID id) {
+        return noteRepository.findByIdAndOwnerId(id, ownerId)
                 .switchIfEmpty(Mono.error(new NotFoundException("Заметка не найдена")))
-                .then(noteRepository.deleteById(id));
+                .flatMap(noteRepository::delete);
     }
 
     private String normalizeRequired(String value, String message) {

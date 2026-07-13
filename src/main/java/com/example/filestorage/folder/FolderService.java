@@ -29,33 +29,34 @@ public class FolderService {
         this.entityTemplate = entityTemplate;
     }
 
-    public Flux<Folder> list(UUID parentId) {
+    public Flux<Folder> list(UUID ownerId, UUID parentId) {
         if (parentId == null) {
-            return folderRepository.findByParentIdIsNullOrderByNameAsc();
+            return folderRepository.findByOwnerIdAndParentIdIsNullOrderByNameAsc(ownerId);
         }
-        return folderRepository.findByParentIdOrderByNameAsc(parentId);
+        return folderRepository.findByOwnerIdAndParentIdOrderByNameAsc(ownerId, parentId);
     }
 
-    public Mono<Folder> create(CreateFolderRequest request) {
+    public Mono<Folder> create(UUID ownerId, CreateFolderRequest request) {
         String name = normalizeName(request.name());
         Mono<Void> parentCheck = request.parentId() == null
                 ? Mono.empty()
-                : folderRepository.existsById(request.parentId())
+                : folderRepository.existsByIdAndOwnerId(request.parentId(), ownerId)
                         .filter(Boolean::booleanValue)
                         .switchIfEmpty(Mono.error(new BadRequestException("Родительская папка не найдена")))
                         .then();
 
         return parentCheck.then(entityTemplate.insert(new Folder(
                 UUID.randomUUID(),
+                ownerId,
                 request.parentId(),
                 name,
                 OffsetDateTime.now()
         )));
     }
 
-    public Mono<Folder> update(UUID id, UpdateFolderRequest request) {
+    public Mono<Folder> update(UUID ownerId, UUID id, UpdateFolderRequest request) {
         String name = normalizeName(request.name());
-        return folderRepository.findById(id)
+        return folderRepository.findByIdAndOwnerId(id, ownerId)
                 .switchIfEmpty(Mono.error(new NotFoundException("Папка не найдена")))
                 .flatMap(folder -> {
                     folder.setName(name);
@@ -63,19 +64,15 @@ public class FolderService {
                 });
     }
 
-    public Mono<Void> delete(UUID id) {
-        return folderRepository.findById(id)
+    public Mono<Void> delete(UUID ownerId, UUID id) {
+        return folderRepository.findByIdAndOwnerId(id, ownerId)
                 .switchIfEmpty(Mono.error(new NotFoundException("Папка не найдена")))
                 .flatMap(folder -> Mono.zip(
-                        folderRepository.countByParentId(id),
-                        storedFileRepository.countByFolderId(id)
-                ))
-                .flatMap(counts -> {
-                    if (counts.getT1() > 0 || counts.getT2() > 0) {
-                        return Mono.error(new ConflictException("Папка не пустая"));
-                    }
-                    return folderRepository.deleteById(id);
-                });
+                        folderRepository.countByOwnerIdAndParentId(ownerId, id),
+                        storedFileRepository.countByOwnerIdAndFolderId(ownerId, id)
+                ).flatMap(counts -> counts.getT1() > 0 || counts.getT2() > 0
+                        ? Mono.error(new ConflictException("Папка не пустая"))
+                        : folderRepository.delete(folder)));
     }
 
     private String normalizeName(String value) {

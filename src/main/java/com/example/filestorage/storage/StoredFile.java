@@ -10,6 +10,7 @@ public class StoredFile {
 
     @Id
     private UUID id;
+    private UUID ownerId;
     private UUID folderId;
     private String originalName;
     private String storageName;
@@ -22,6 +23,7 @@ public class StoredFile {
 
     public StoredFile(
             UUID id,
+            UUID ownerId,
             UUID folderId,
             String originalName,
             String storageName,
@@ -30,6 +32,7 @@ public class StoredFile {
             OffsetDateTime createdAt
     ) {
         this.id = id;
+        this.ownerId = ownerId;
         this.folderId = folderId;
         this.originalName = originalName;
         this.storageName = storageName;
@@ -45,6 +48,9 @@ public class StoredFile {
     public void setId(UUID id) {
         this.id = id;
     }
+
+    public UUID getOwnerId() { return ownerId; }
+    public void setOwnerId(UUID ownerId) { this.ownerId = ownerId; }
 
     public UUID getFolderId() {
         return folderId;

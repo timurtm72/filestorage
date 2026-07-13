@@ -1,5 +1,6 @@
 package com.example.filestorage.storage;
 
+import com.example.filestorage.auth.AppPrincipal;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.springframework.http.ContentDisposition;
@@ -8,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.multipart.FilePart;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,22 +33,24 @@ public class FileController {
     }
 
     @GetMapping
-    public Flux<StoredFile> list(@RequestParam(required = false) UUID folderId) {
-        return fileStorageService.list(folderId);
+    public Flux<StoredFile> list(@AuthenticationPrincipal AppPrincipal principal,
+            @RequestParam(required = false) UUID folderId) {
+        return fileStorageService.list(principal.id(), folderId);
     }
 
     @PostMapping(path = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public Mono<StoredFile> upload(
+            @AuthenticationPrincipal AppPrincipal principal,
             @RequestParam(required = false) UUID folderId,
             @RequestPart("file") FilePart file
     ) {
-        return fileStorageService.store(folderId, file);
+        return fileStorageService.store(principal.id(), folderId, file);
     }
 
     @GetMapping("/{id}/download")
-    public Mono<ResponseEntity<?>> download(@PathVariable UUID id) {
-        return fileStorageService.download(id)
+    public Mono<ResponseEntity<?>> download(@AuthenticationPrincipal AppPrincipal principal, @PathVariable UUID id) {
+        return fileStorageService.download(principal.id(), id)
                 .map(download -> ResponseEntity.ok()
                         .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
                                 .filename(download.metadata().getOriginalName(), StandardCharsets.UTF_8)
@@ -58,7 +62,7 @@ public class FileController {
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public Mono<Void> delete(@PathVariable UUID id) {
-        return fileStorageService.delete(id);
+    public Mono<Void> delete(@AuthenticationPrincipal AppPrincipal principal, @PathVariable UUID id) {
+        return fileStorageService.delete(principal.id(), id);
     }
 }

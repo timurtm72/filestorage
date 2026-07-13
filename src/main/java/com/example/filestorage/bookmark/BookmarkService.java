@@ -24,17 +24,19 @@ public class BookmarkService {
         this.groupRepository = groupRepository;
     }
 
-    public Flux<Bookmark> list(UUID groupId, boolean ungrouped) {
-        if (ungrouped) return bookmarkRepository.findByGroupIdIsNullOrderByCreatedAtDesc();
-        return groupId == null ? bookmarkRepository.findAllByOrderByCreatedAtDesc() : bookmarkRepository.findByGroupIdOrderByCreatedAtDesc(groupId);
+    public Flux<Bookmark> list(UUID ownerId, UUID groupId, boolean ungrouped) {
+        if (ungrouped) return bookmarkRepository.findByOwnerIdAndGroupIdIsNullOrderByCreatedAtDesc(ownerId);
+        return groupId == null ? bookmarkRepository.findByOwnerIdOrderByCreatedAtDesc(ownerId)
+                : bookmarkRepository.findByOwnerIdAndGroupIdOrderByCreatedAtDesc(ownerId, groupId);
     }
 
-    public Mono<Bookmark> create(BookmarkRequest request) {
+    public Mono<Bookmark> create(UUID ownerId, BookmarkRequest request) {
         String title = normalizeRequired(request.title(), "Название обязательно");
         String url = normalizeUrl(request.url());
         String description = request.description() == null ? null : request.description().trim();
-        return validateGroup(request.groupId(), "BOOKMARK").then(entityTemplate.insert(new Bookmark(
+        return validateGroup(ownerId, request.groupId(), "BOOKMARK").then(entityTemplate.insert(new Bookmark(
                 UUID.randomUUID(),
+                ownerId,
                 request.groupId(),
                 title,
                 url,
@@ -43,32 +45,31 @@ public class BookmarkService {
         )));
     }
 
-    public Mono<Bookmark> update(UUID id, BookmarkRequest request) {
+    public Mono<Bookmark> update(UUID ownerId, UUID id, BookmarkRequest request) {
         String title = normalizeRequired(request.title(), "Название обязательно");
         String url = normalizeUrl(request.url());
         String description = request.description() == null ? null : request.description().trim();
-        return bookmarkRepository.findById(id)
+        return bookmarkRepository.findByIdAndOwnerId(id, ownerId)
                 .switchIfEmpty(Mono.error(new NotFoundException("Закладка не найдена")))
                 .flatMap(bookmark -> {
                     bookmark.setTitle(title);
                     bookmark.setUrl(url);
                     bookmark.setDescription(description);
                     bookmark.setGroupId(request.groupId());
-                    return validateGroup(request.groupId(), "BOOKMARK").then(bookmarkRepository.save(bookmark));
+                    return validateGroup(ownerId, request.groupId(), "BOOKMARK").then(bookmarkRepository.save(bookmark));
                 });
     }
 
-    private Mono<Void> validateGroup(UUID groupId, String type) {
-        if (groupId == null) return Mono.empty();
-        return groupRepository.findById(groupId).filter(group -> type.equals(group.getType()))
+    private Mono<Void> validateGroup(UUID ownerId, UUID groupId, String type) {
+        if (groupId == null) return Mono.error(new BadRequestException("Группа обязательна"));
+        return groupRepository.findByIdAndOwnerId(groupId, ownerId).filter(group -> type.equals(group.getType()))
                 .switchIfEmpty(Mono.error(new BadRequestException("Группа не найдена"))).then();
     }
 
-    public Mono<Void> delete(UUID id) {
-        return bookmarkRepository.existsById(id)
-                .filter(Boolean::booleanValue)
+    public Mono<Void> delete(UUID ownerId, UUID id) {
+        return bookmarkRepository.findByIdAndOwnerId(id, ownerId)
                 .switchIfEmpty(Mono.error(new NotFoundException("Закладка не найдена")))
-                .then(bookmarkRepository.deleteById(id));
+                .flatMap(bookmarkRepository::delete);
     }
 
     private String normalizeRequired(String value, String message) {

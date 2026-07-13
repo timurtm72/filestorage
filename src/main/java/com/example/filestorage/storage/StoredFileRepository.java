@@ -7,9 +7,8 @@ import reactor.core.publisher.Mono;
 
 public interface StoredFileRepository extends ReactiveCrudRepository<StoredFile, UUID> {
 
-    Flux<StoredFile> findByFolderIdOrderByOriginalNameAsc(UUID folderId);
-
-    Flux<StoredFile> findByFolderIdIsNullOrderByOriginalNameAsc();
-
-    Mono<Long> countByFolderId(UUID folderId);
+    Flux<StoredFile> findByOwnerIdAndFolderIdOrderByOriginalNameAsc(UUID ownerId, UUID folderId);
+    Flux<StoredFile> findByOwnerIdAndFolderIdIsNullOrderByOriginalNameAsc(UUID ownerId);
+    Mono<StoredFile> findByIdAndOwnerId(UUID id, UUID ownerId);
+    Mono<Long> countByOwnerIdAndFolderId(UUID ownerId, UUID folderId);
 }

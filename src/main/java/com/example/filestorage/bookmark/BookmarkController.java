@@ -1,7 +1,9 @@
 package com.example.filestorage.bookmark;
 
+import com.example.filestorage.auth.AppPrincipal;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -26,25 +28,28 @@ public class BookmarkController {
     }
 
     @GetMapping
-    public Flux<Bookmark> list(@RequestParam(required = false) UUID groupId,
+    public Flux<Bookmark> list(@AuthenticationPrincipal AppPrincipal principal,
+            @RequestParam(required = false) UUID groupId,
             @RequestParam(defaultValue = "false") boolean ungrouped) {
-        return bookmarkService.list(groupId, ungrouped);
+        return bookmarkService.list(principal.id(), groupId, ungrouped);
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public Mono<Bookmark> create(@RequestBody BookmarkRequest request) {
-        return bookmarkService.create(request);
+    public Mono<Bookmark> create(@AuthenticationPrincipal AppPrincipal principal,
+            @RequestBody BookmarkRequest request) {
+        return bookmarkService.create(principal.id(), request);
     }
 
     @PatchMapping("/{id}")
-    public Mono<Bookmark> update(@PathVariable UUID id, @RequestBody BookmarkRequest request) {
-        return bookmarkService.update(id, request);
+    public Mono<Bookmark> update(@AuthenticationPrincipal AppPrincipal principal,
+            @PathVariable UUID id, @RequestBody BookmarkRequest request) {
+        return bookmarkService.update(principal.id(), id, request);
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public Mono<Void> delete(@PathVariable UUID id) {
-        return bookmarkService.delete(id);
+    public Mono<Void> delete(@AuthenticationPrincipal AppPrincipal principal, @PathVariable UUID id) {
+        return bookmarkService.delete(principal.id(), id);
     }
 }

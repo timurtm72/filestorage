@@ -1,7 +1,9 @@
 package com.example.filestorage.folder;
 
 import java.util.UUID;
+import com.example.filestorage.auth.AppPrincipal;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -26,24 +28,27 @@ public class FolderController {
     }
 
     @GetMapping
-    public Flux<Folder> list(@RequestParam(required = false) UUID parentId) {
-        return folderService.list(parentId);
+    public Flux<Folder> list(@AuthenticationPrincipal AppPrincipal principal,
+            @RequestParam(required = false) UUID parentId) {
+        return folderService.list(principal.id(), parentId);
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public Mono<Folder> create(@RequestBody CreateFolderRequest request) {
-        return folderService.create(request);
+    public Mono<Folder> create(@AuthenticationPrincipal AppPrincipal principal,
+            @RequestBody CreateFolderRequest request) {
+        return folderService.create(principal.id(), request);
     }
 
     @PatchMapping("/{id}")
-    public Mono<Folder> update(@PathVariable UUID id, @RequestBody UpdateFolderRequest request) {
-        return folderService.update(id, request);
+    public Mono<Folder> update(@AuthenticationPrincipal AppPrincipal principal,
+            @PathVariable UUID id, @RequestBody UpdateFolderRequest request) {
+        return folderService.update(principal.id(), id, request);
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public Mono<Void> delete(@PathVariable UUID id) {
-        return folderService.delete(id);
+    public Mono<Void> delete(@AuthenticationPrincipal AppPrincipal principal, @PathVariable UUID id) {
+        return folderService.delete(principal.id(), id);
     }
 }

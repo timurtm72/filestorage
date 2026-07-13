@@ -27,6 +27,12 @@ public class ApiExceptionHandler {
         return error(exception.getMessage(), HttpStatus.CONFLICT);
     }
 
+    @ExceptionHandler(UnauthorizedException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ApiError handleUnauthorized(UnauthorizedException exception) {
+        return error(exception.getMessage(), HttpStatus.UNAUTHORIZED);
+    }
+
     private ApiError error(String message, HttpStatus status) {
         return new ApiError(message, status.value(), OffsetDateTime.now());
     }

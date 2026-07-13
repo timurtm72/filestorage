@@ -10,6 +10,7 @@ public class Folder {
 
     @Id
     private UUID id;
+    private UUID ownerId;
     private UUID parentId;
     private String name;
     private OffsetDateTime createdAt;
@@ -17,8 +18,9 @@ public class Folder {
     public Folder() {
     }
 
-    public Folder(UUID id, UUID parentId, String name, OffsetDateTime createdAt) {
+    public Folder(UUID id, UUID ownerId, UUID parentId, String name, OffsetDateTime createdAt) {
         this.id = id;
+        this.ownerId = ownerId;
         this.parentId = parentId;
         this.name = name;
         this.createdAt = createdAt;
@@ -31,6 +33,9 @@ public class Folder {
     public void setId(UUID id) {
         this.id = id;
     }
+
+    public UUID getOwnerId() { return ownerId; }
+    public void setOwnerId(UUID ownerId) { this.ownerId = ownerId; }
 
     public UUID getParentId() {
         return parentId;

@@ -26,20 +26,25 @@ public class ContentGroupService {
         this.repository = repository; this.bookmarks = bookmarks; this.notes = notes; this.template = template;
     }
 
-    public Flux<ContentGroup> list(String type) { return repository.findByTypeOrderByNameAsc(normalizeType(type)); }
-    public Mono<ContentGroup> create(ContentGroupRequest request) {
-        return template.insert(new ContentGroup(UUID.randomUUID(), normalizeType(request.type()),
+    public Flux<ContentGroup> list(UUID ownerId, String type) {
+        return repository.findByOwnerIdAndTypeOrderByNameAsc(ownerId, normalizeType(type));
+    }
+    public Mono<ContentGroup> create(UUID ownerId, ContentGroupRequest request) {
+        return template.insert(new ContentGroup(UUID.randomUUID(), ownerId, normalizeType(request.type()),
                 normalizeName(request.name()), OffsetDateTime.now()));
     }
-    public Mono<ContentGroup> update(UUID id, ContentGroupRequest request) {
-        return repository.findById(id).switchIfEmpty(Mono.error(new NotFoundException("Группа не найдена")))
+    public Mono<ContentGroup> update(UUID ownerId, UUID id, ContentGroupRequest request) {
+        return repository.findByIdAndOwnerId(id, ownerId)
+                .switchIfEmpty(Mono.error(new NotFoundException("Группа не найдена")))
                 .flatMap(group -> { group.setName(normalizeName(request.name())); return repository.save(group); });
     }
-    public Mono<Void> delete(UUID id) {
-        return repository.findById(id).switchIfEmpty(Mono.error(new NotFoundException("Группа не найдена")))
-                .flatMap(group -> Mono.zip(bookmarks.countByGroupId(id), notes.countByGroupId(id)))
-                .flatMap(counts -> counts.getT1() + counts.getT2() > 0
-                        ? Mono.error(new ConflictException("Группа не пустая")) : repository.deleteById(id));
+    public Mono<Void> delete(UUID ownerId, UUID id) {
+        return repository.findByIdAndOwnerId(id, ownerId)
+                .switchIfEmpty(Mono.error(new NotFoundException("Группа не найдена")))
+                .flatMap(group -> Mono.zip(bookmarks.countByOwnerIdAndGroupId(ownerId, id),
+                                notes.countByOwnerIdAndGroupId(ownerId, id))
+                        .flatMap(counts -> counts.getT1() + counts.getT2() > 0
+                                ? Mono.error(new ConflictException("Группа не пустая")) : repository.delete(group)));
     }
     private String normalizeType(String value) {
         String type = value == null ? "" : value.trim().toUpperCase();

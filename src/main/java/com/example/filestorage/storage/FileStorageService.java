@@ -38,21 +38,21 @@ public class FileStorageService {
         this.fileRoot = storageProperties.fileRoot().toAbsolutePath().normalize();
     }
 
-    public Flux<StoredFile> list(UUID folderId) {
+    public Flux<StoredFile> list(UUID ownerId, UUID folderId) {
         if (folderId == null) {
-            return storedFileRepository.findByFolderIdIsNullOrderByOriginalNameAsc();
+            return storedFileRepository.findByOwnerIdAndFolderIdIsNullOrderByOriginalNameAsc(ownerId);
         }
-        return storedFileRepository.findByFolderIdOrderByOriginalNameAsc(folderId);
+        return storedFileRepository.findByOwnerIdAndFolderIdOrderByOriginalNameAsc(ownerId, folderId);
     }
 
-    public Mono<StoredFile> store(UUID folderId, FilePart filePart) {
+    public Mono<StoredFile> store(UUID ownerId, UUID folderId, FilePart filePart) {
         if (filePart == null || filePart.filename() == null || filePart.filename().isBlank()) {
             return Mono.error(new BadRequestException("Файл обязателен"));
         }
 
         Mono<Void> folderCheck = folderId == null
                 ? Mono.empty()
-                : folderRepository.existsById(folderId)
+                : folderRepository.existsByIdAndOwnerId(folderId, ownerId)
                         .filter(Boolean::booleanValue)
                         .switchIfEmpty(Mono.error(new BadRequestException("Папка не найдена")))
                         .then();
@@ -71,6 +71,7 @@ public class FileStorageService {
                 .then(Mono.fromCallable(() -> Files.size(target)).subscribeOn(Schedulers.boundedElastic()))
                 .flatMap(size -> entityTemplate.insert(new StoredFile(
                         id,
+                        ownerId,
                         folderId,
                         originalName,
                         storageName,
@@ -83,8 +84,8 @@ public class FileStorageService {
                         .then(Mono.error(exception)));
     }
 
-    public Mono<DownloadFile> download(UUID id) {
-        return storedFileRepository.findById(id)
+    public Mono<DownloadFile> download(UUID ownerId, UUID id) {
+        return storedFileRepository.findByIdAndOwnerId(id, ownerId)
                 .switchIfEmpty(Mono.error(new NotFoundException("Файл не найден")))
                 .map(file -> {
                     Path path = fileRoot.resolve(file.getStorageName()).normalize();
@@ -96,8 +97,8 @@ public class FileStorageService {
                 });
     }
 
-    public Mono<Void> delete(UUID id) {
-        return storedFileRepository.findById(id)
+    public Mono<Void> delete(UUID ownerId, UUID id) {
+        return storedFileRepository.findByIdAndOwnerId(id, ownerId)
                 .switchIfEmpty(Mono.error(new NotFoundException("Файл не найден")))
                 .flatMap(file -> Mono.<Void>fromRunnable(() -> deletePhysicalFile(file))
                         .subscribeOn(Schedulers.boundedElastic())
