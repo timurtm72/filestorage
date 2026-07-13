@@ -198,6 +198,8 @@ function App() {
   const [contentModal, setContentModal] = useState<'BOOKMARK' | 'NOTE' | null>(null)
   const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null)
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
+  const [fileSearch, setFileSearch] = useState('')
+  const [bookmarkSearch, setBookmarkSearch] = useState('')
   const [noteSearch, setNoteSearch] = useState('')
   const [toasts, setToasts] = useState<Toast[]>([])
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
@@ -214,6 +216,28 @@ function App() {
     () => files.reduce((total, file) => total + file.sizeBytes, 0),
     [files],
   )
+
+  const filteredFolders = useMemo(() => {
+    const query = fileSearch.trim().toLocaleLowerCase('ru-RU')
+    if (!query) return folders
+    return folders.filter((folder) => folder.name.toLocaleLowerCase('ru-RU').includes(query))
+  }, [fileSearch, folders])
+
+  const filteredFiles = useMemo(() => {
+    const query = fileSearch.trim().toLocaleLowerCase('ru-RU')
+    if (!query) return files
+    return files.filter((file) => file.originalName.toLocaleLowerCase('ru-RU').includes(query))
+  }, [fileSearch, files])
+
+  const filteredBookmarks = useMemo(() => {
+    const query = bookmarkSearch.trim().toLocaleLowerCase('ru-RU')
+    if (!query) return bookmarks
+    return bookmarks.filter((bookmark) =>
+      `${bookmark.title} ${bookmark.url} ${bookmark.description ?? ''}`
+        .toLocaleLowerCase('ru-RU')
+        .includes(query),
+    )
+  }, [bookmarkSearch, bookmarks])
 
   const filteredNotes = useMemo(() => {
     const query = noteSearch.trim().toLocaleLowerCase('ru-RU')
@@ -811,19 +835,27 @@ function App() {
             exit={{ opacity: 0, y: -12 }}
             transition={{ duration: 0.22 }}
           >
-            <div className="toolbar">
+            <div className="toolbar files-toolbar">
               <div className="breadcrumbs" aria-label="Путь">
-                {path.map((item, index) => (
-                  <button
-                    type="button"
-                    key={`${item.id ?? 'root'}-${index}`}
-                    onClick={() => goToPath(index)}
-                  >
-                    {index === 0 && <Home size={16} />}
-                    {item.name}
-                  </button>
-                ))}
+                {path.map((item, index) => {
+                  const isCurrent = index === path.length - 1
+                  const content = <>{index === 0 && <Home size={16} />}{item.name}</>
+                  return isCurrent ? (
+                    <span className="breadcrumb-current" key={`${item.id ?? 'root'}-${index}`}>{content}</span>
+                  ) : (
+                    <button type="button" key={`${item.id ?? 'root'}-${index}`} onClick={() => goToPath(index)}>{content}</button>
+                  )
+                })}
               </div>
+              <label className="search-field">
+                <Search size={17} />
+                <input
+                  value={fileSearch}
+                  onChange={(event) => setFileSearch(event.target.value)}
+                  placeholder="Поиск файлов и папок"
+                  aria-label="Поиск файлов и папок"
+                />
+              </label>
               <div className="toolbar-actions">
                 <button type="button" onClick={() => openStorageModal(currentFolderId, currentFolder.name, true)}><FolderPlus size={16} />Новая папка</button>
                 <button type="button" className="secondary-button" onClick={() => loadFilesView(currentFolderId)}><RefreshCw size={16} />Обновить</button>
@@ -843,14 +875,17 @@ function App() {
                 <SkeletonRows rows={4} />
               ) : (
                 <AnimatePresence initial={false}>
-                  {folders.map((folder) => renderFolderBranch(folder))}
+                  {filteredFolders.map((folder) => renderFolderBranch(folder))}
 
-                  {files.map((file) => renderFileRow(file))}
+                  {filteredFiles.map((file) => renderFileRow(file))}
                 </AnimatePresence>
               )}
 
               {!isLoading && folders.length === 0 && files.length === 0 && (
                 <EmptyState icon={<Folder size={30} />} text="В этой папке пока пусто" />
+              )}
+              {!isLoading && (folders.length > 0 || files.length > 0) && filteredFolders.length === 0 && filteredFiles.length === 0 && (
+                <EmptyState icon={<Search size={30} />} text="Ничего не найдено" />
               )}
             </div>
           </motion.section>
@@ -864,8 +899,17 @@ function App() {
             exit={{ opacity: 0, y: -12 }}
             transition={{ duration: 0.22 }}
           >
-            <div className="toolbar">
+            <div className="toolbar bookmarks-toolbar">
               <h2>Закладки</h2>
+              <label className="search-field">
+                <Search size={17} />
+                <input
+                  value={bookmarkSearch}
+                  onChange={(event) => setBookmarkSearch(event.target.value)}
+                  placeholder="Поиск по закладкам"
+                  aria-label="Поиск по закладкам"
+                />
+              </label>
               <button type="button" className="secondary-button" onClick={loadBookmarks}>
                 <RefreshCw size={16} />
                 Обновить
@@ -882,7 +926,7 @@ function App() {
               ) : (
                 bookmarkGroups.map((group) => {
                   const { id, name } = group
-                  const items = bookmarks.filter((bookmark) => bookmark.groupId === group.id)
+                  const items = filteredBookmarks.filter((bookmark) => bookmark.groupId === group.id)
                   const expanded = expandedBookmarkGroups[id] ?? true
                   return (
                     <section className="content-group" key={id}>

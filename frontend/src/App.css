@@ -283,6 +283,16 @@ button:disabled {
   white-space: nowrap;
 }
 
+.breadcrumb-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 4px;
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .breadcrumbs button:not(:last-child)::after {
   content: '/';
   margin-left: 12px;
@@ -660,6 +670,8 @@ textarea:focus {
   font-size: 14px;
 }
 
+.files-toolbar,
+.bookmarks-toolbar,
 .notes-toolbar {
   display: grid;
   grid-template-columns: 1fr minmax(240px, 420px) auto;
@@ -1100,6 +1112,8 @@ textarea:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .files-toolbar,
+  .bookmarks-toolbar,
   .notes-toolbar {
     grid-template-columns: 1fr;
   }
@@ -1160,7 +1174,7 @@ textarea:focus {
     flex-direction: column;
   }
 
-  .toolbar:not(.notes-toolbar) {
+  .toolbar:not(.files-toolbar):not(.bookmarks-toolbar):not(.notes-toolbar) {
     align-items: stretch;
     flex-direction: column;
   }
