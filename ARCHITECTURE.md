@@ -113,6 +113,14 @@ React хранит:
 
 Поиск заметок выполняется на клиенте по заголовку и тексту. Создание и изменение используют одно модальное окно. Допустимые цвета ограничены одинаковым набором на frontend и backend: `white`, `yellow`, `green`, `blue`, `rose`.
 
+### Поиск
+
+Поиск выполняется на клиенте без дополнительных API-запросов:
+
+- в файловом разделе фильтруются файлы и папки текущего открытого каталога по имени;
+- в закладках проверяются название, URL и описание, при этом сохраняется структура групп;
+- в заметках проверяются заголовок и текст, при этом сохраняется структура групп.
+
 ### Визуальный слой
 
 - Framer Motion управляет переходами и анимациями;
@@ -180,4 +188,29 @@ Spring Security WebFlux защищает API. Публичны только по
 
 ## Production-развёртывание
 
-`compose.prod.yaml` создаёт только контейнеры `filestorage-backend` и `filestorage-frontend`. Они подключаются к существующим контейнеру PostgreSQL 15 с именем `postgres` и внешней сети `app-network`. Frontend публикуется на порту `8080` только для указанного `TAILSCALE_IP`; PostgreSQL и backend наружу не публикуются. Файлы сохраняются на отдельном диске через bind mount `UPLOADS_PATH`.
+Рабочее развёртывание на Orange Pi использует `compose.orange-pi.yaml` и три изолированных контейнера:
+
+| Контейнер | Назначение | Публикация |
+|---|---|---|
+| `filestorage-frontend` | nginx со статическим React-приложением и proxy `/api` | только `TAILSCALE_IP:3001` |
+| `filestorage-backend` | Spring Boot API | только внутренняя Docker-сеть, порт `8081` |
+| `filestorage-db` | PostgreSQL 17 | только внутренняя Docker-сеть, порт `5432` |
+
+`filestorage-network` и том `filestorage-database` принадлежат только этому проекту. Файлы подключаются к backend через bind mount `UPLOADS_PATH`.
+
+Внешний маршрут выглядит так:
+
+```text
+браузер
+  -> HTTPS files.tm-port.ru
+  -> nginx на VPS
+  -> Tailscale 100.x.x.x:3001
+  -> frontend nginx на Orange Pi
+  -> /api -> backend -> PostgreSQL или UPLOADS_PATH
+```
+
+На домашнем роутере порты не открываются. Backend и PostgreSQL не доступны ни из интернета, ни напрямую через Tailscale. После выпуска TLS-сертификата приложение запускается с `APP_PUBLIC_URL=https://files.tm-port.ru` и `SECURE_COOKIE=true`.
+
+`compose.prod.yaml` сохранён как альтернативная схема для сервера с уже существующими PostgreSQL `postgres` и внешней сетью `app-network`.
+
+Полная инструкция и эксплуатационные команды приведены в [DEPLOYMENT_ORANGE_PI.md](DEPLOYMENT_ORANGE_PI.md).
