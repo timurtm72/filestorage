@@ -1,0 +1,83 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  database:
+    image: postgres:17-alpine
+    container_name: filestorage-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-filestorage}
+      POSTGRES_USER: ${DATABASE_USERNAME:-filestorage}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+    volumes:
+      - filestorage-database:/var/lib/postgresql/data
+    networks:
+      - filestorage-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USERNAME:-filestorage} -d ${DATABASE_NAME:-filestorage}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *logging
+
+  backend:
+    build: .
+    container_name: filestorage-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: r2dbc:postgresql://database:5432/${DATABASE_NAME:-filestorage}
+      DATABASE_USERNAME: ${DATABASE_USERNAME:-filestorage}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=${JAVA_MAX_RAM_PERCENTAGE:-60}
+      FILE_STORAGE_ROOT: /data/uploads
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-1GB}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:?Set APP_PUBLIC_URL in .env}
+      MAIL_ENABLED: ${MAIL_ENABLED:-false}
+      SECURE_COOKIE: ${SECURE_COOKIE:-false}
+      SESSION_HOURS: ${SESSION_HOURS:-168}
+      VERIFICATION_HOURS: ${VERIFICATION_HOURS:-24}
+      LOGIN_VERIFICATION_MINUTES: ${LOGIN_VERIFICATION_MINUTES:-15}
+    volumes:
+      - ${UPLOADS_PATH:-./data/uploads}:/data/uploads
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - filestorage-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/api/auth/csrf"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    logging: *logging
+
+  frontend:
+    build: ./frontend
+    container_name: filestorage-frontend
+    restart: unless-stopped
+    ports:
+      - "${TAILSCALE_IP:?Set TAILSCALE_IP in .env}:${APP_PORT:-3001}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - filestorage-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+volumes:
+  filestorage-database:
+
+networks:
+  filestorage-network:
+    driver: bridge

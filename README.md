@@ -36,6 +36,20 @@ npm run dev
 
 ## Развёртывание на сервере
 
+### Orange Pi
+
+Для Orange Pi предусмотрен изолированный Compose-файл с собственной PostgreSQL и Docker-сетью. Он не использует контейнеры других проектов:
+
+```bash
+cp .env.orange-pi.example .env
+# Замените DATABASE_PASSWORD и при необходимости TAILSCALE_IP в .env
+docker compose -f compose.orange-pi.yaml up --build -d
+```
+
+По умолчанию интерфейс доступен только через Tailscale на порту `3001`. Путь `UPLOADS_PATH` можно позже перенести на смонтированный SSD без изменения контейнеров.
+
+### Общая серверная схема
+
 Production Compose использует существующие контейнер PostgreSQL `postgres` и внешнюю Docker-сеть `app-network`. В PostgreSQL предварительно создайте отдельные базу и пользователя `filestorage`.
 
 Скопируйте `.env.example` в `.env`, укажите пароль БД, Tailscale IP сервера и тот же адрес в `APP_PUBLIC_URL`:
