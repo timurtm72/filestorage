@@ -297,7 +297,8 @@ journalctl -u nginx -n 100 --no-pager
 docker logs --tail=100 ИМЯ_КОНТЕЙНЕРА
 ```
 
+Frontend nginx использует встроенный Docker DNS `127.0.0.11` и повторно разрешает адрес backend. Поэтому после перезагрузки платы frontend не должен завершаться с ошибкой `host not found in upstream`, даже если backend запускается дольше.
+
 ## 12. Почта
 
 По умолчанию `MAIL_ENABLED=false`, поэтому приложение работает без SMTP. Для production-регистрации с подтверждением адреса настройте переменные `MAIL_*`, установите `MAIL_ENABLED=true` и пересоздайте backend. Не публикуйте SMTP-пароль в Git.
-
