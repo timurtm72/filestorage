@@ -44,6 +44,8 @@
 - системный Basic Auth-диалог браузера заменён экраном входа приложения.
 - healthcheck frontend на Orange Pi использует IPv4 `127.0.0.1` и корректно работает при IPv6-разрешении `localhost`.
 - frontend nginx использует динамическое разрешение backend через Docker DNS и не падает, если backend запускается позже после перезагрузки платы.
+- автозапуск Orange Pi ждёт `tailscale-online.target` и пересоздаёт frontend после назначения Tailscale IP;
+- устранена остановка frontend с `Exit 255` и `cannot assign requested address` после перезагрузки платы.
 
 ## [0.3.0] — 2026-07-12
 

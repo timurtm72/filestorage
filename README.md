@@ -49,6 +49,8 @@ docker compose -f compose.orange-pi.yaml up --build -d
 
 По умолчанию интерфейс доступен только через Tailscale на порту `3001`. Путь `UPLOADS_PATH` можно позже перенести на смонтированный SSD без изменения контейнеров.
 
+На Orange Pi запуск Compose привязан к `tailscale-online.target`: systemd ждёт появления Tailscale IP и выполняет `up -d --force-recreate frontend`. Это предотвращает ошибку привязки `TAILSCALE_IP:3001` после перезагрузки. Полное восстановление занимает до 1–2 минут.
+
 Полная инструкция по установке на плату, настройке VPS, nginx, HTTPS, обновлению, резервному копированию и переносу на SSD находится в [DEPLOYMENT_ORANGE_PI.md](DEPLOYMENT_ORANGE_PI.md).
 
 ### Общая серверная схема

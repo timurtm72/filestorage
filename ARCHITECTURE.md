@@ -211,6 +211,8 @@ Spring Security WebFlux защищает API. Публичны только по
 
 На домашнем роутере порты не открываются. Backend и PostgreSQL не доступны ни из интернета, ни напрямую через Tailscale. После выпуска TLS-сертификата приложение запускается с `APP_PUBLIC_URL=https://files.tm-port.ru` и `SECURE_COOKIE=true`.
 
+Автозапуск управляется `/etc/systemd/system/filestorage.service`. Сервис запускается после `docker.service` и `tailscale-online.target`, дополнительно выполняет `tailscale wait`, затем принудительно пересоздаёт frontend. Это необходимо, потому что Docker не повторяет привязку порта к Tailscale IP после ошибки `cannot assign requested address`. База и backend при этом не пересоздаются.
+
 `compose.prod.yaml` сохранён как альтернативная схема для сервера с уже существующими PostgreSQL `postgres` и внешней сетью `app-network`.
 
 Полная инструкция и эксплуатационные команды приведены в [DEPLOYMENT_ORANGE_PI.md](DEPLOYMENT_ORANGE_PI.md).
